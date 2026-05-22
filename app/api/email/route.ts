@@ -1,33 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+async function sendEmail(to: string, subject: string, html: string) {
+  console.log('Sending to:', to)
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer re_KRPN6946_4wbBcs6F5dDvHkrLAatXhh3x',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: 'onboarding@resend.dev',
+      to: [to],
+      subject,
+      html,
+    }),
+  })
+  const result = await res.json()
+  console.log('Resend result:', JSON.stringify(result))
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json()
   const { type, data } = body
   console.log('Email API called with type:', type)
 
   try {
-    async function send(to: string, subject: string, html: string) {
-      console.log('Sending to:', to)
-      const res = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Bearer re_KRPN6946_4wbBcs6F5dDvHkrLAatXhh3x',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: 'onboarding@resend.dev',
-          to: [to],
-          subject,
-          html,
-        }),
-      })
-      const result = await res.json()
-      console.log('Resend result:', JSON.stringify(result))
-    }
-
     if (type === 'po_submitted') {
       const { po } = data
-      await send(
+      await sendEmail(
         'girish.agrahari@finmo.net',
         `[ProcureIQ] New PO Pending Approval - ${po.po_number}`,
         `<div style="font-family:sans-serif;padding:24px;max-width:600px">
@@ -37,7 +37,6 @@ export async function POST(req: NextRequest) {
           <p><strong>Amount:</strong> ${po.currency} ${Number(po.amount).toLocaleString()}</p>
           <p><strong>Category:</strong> ${po.category}</p>
           <p><strong>Description:</strong> ${po.description}</p>
-          <br/>
           <p style="color:#9ca3af;font-size:12px">ProcureIQ Enterprise</p>
         </div>`
       )
@@ -45,18 +44,16 @@ export async function POST(req: NextRequest) {
 
     if (type === 'po_approved') {
       const { po, approverName, isFinal, makerEmail } = data
-      await send(
+      await sendEmail(
         makerEmail,
         isFinal
           ? `[ProcureIQ] PO Fully Approved - ${po.po_number}`
           : `[ProcureIQ] PO Approved - Moving to Next Level - ${po.po_number}`,
         `<div style="font-family:sans-serif;padding:24px;max-width:600px">
-          <h2 style="color:#16a34a">${isFinal ? 'Your PO has been Fully Approved' : 'Your PO has been Approved at this Level'}</h2>
+          <h2 style="color:#16a34a">${isFinal ? 'Your PO has been Fully Approved' : 'Approved - Pending Next Level'}</h2>
           <p><strong>PO Number:</strong> ${po.po_number}</p>
           <p><strong>Approved By:</strong> ${approverName}</p>
           <p><strong>Total Amount:</strong> ${po.currency} ${Number(po.total_amount).toLocaleString()}</p>
-          <p><strong>Status:</strong> ${isFinal ? 'Fully Approved' : 'Pending next level approval'}</p>
-          <br/>
           <p style="color:#9ca3af;font-size:12px">ProcureIQ Enterprise</p>
         </div>`
       )
@@ -64,16 +61,14 @@ export async function POST(req: NextRequest) {
 
     if (type === 'po_rejected') {
       const { po, approverName, reason, makerEmail } = data
-      await send(
+      await sendEmail(
         makerEmail,
         `[ProcureIQ] PO Rejected - ${po.po_number}`,
         `<div style="font-family:sans-serif;padding:24px;max-width:600px">
           <h2 style="color:#dc2626">Your PO has been Rejected</h2>
           <p><strong>PO Number:</strong> ${po.po_number}</p>
           <p><strong>Rejected By:</strong> ${approverName}</p>
-          <p><strong>Amount:</strong> ${po.currency} ${Number(po.total_amount).toLocaleString()}</p>
           <p><strong>Reason:</strong> <span style="color:#dc2626">${reason}</span></p>
-          <br/>
           <p style="color:#9ca3af;font-size:12px">ProcureIQ Enterprise</p>
         </div>`
       )
@@ -81,8 +76,9 @@ export async function POST(req: NextRequest) {
 
     if (type === 'payment_completed') {
       const { payment, supplierName, notifyEmails } = data
-      for (const email of (Array.isArray(notifyEmails) ? notifyEmails : [notifyEmails])) {
-        await send(
+      const emails = Array.isArray(notifyEmails) ? notifyEmails : [notifyEmails]
+      for (const email of emails) {
+        await sendEmail(
           email,
           `[ProcureIQ] Payment Processed - ${payment.invoice_number}`,
           `<div style="font-family:sans-serif;padding:24px;max-width:600px">
@@ -90,10 +86,7 @@ export async function POST(req: NextRequest) {
             <p><strong>Invoice:</strong> ${payment.invoice_number}</p>
             <p><strong>Supplier:</strong> ${supplierName}</p>
             <p><strong>Amount:</strong> ${payment.currency} ${Number(payment.invoice_amount).toLocaleString()}</p>
-            <p><strong>Method:</strong> ${payment.payment_method}</p>
             <p><strong>Reference:</strong> ${payment.bank_ref}</p>
-            <p><strong>Date:</strong> ${payment.paid_date}</p>
-            <br/>
             <p style="color:#9ca3af;font-size:12px">ProcureIQ Enterprise</p>
           </div>`
         )
