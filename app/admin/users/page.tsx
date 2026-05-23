@@ -12,8 +12,8 @@ export default function UsersPage() {
   const [editingUser, setEditingUser] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
-  const [form, setForm] = useState({ email:'', role_code:'', department:'', entity:'all' })
-  const [editForm, setEditForm] = useState({ department:'', role_code:'' })
+  const [form, setForm] = useState({ email:'', role_code:'', department:'', entity:'all', manages_department:'' })
+  const [editForm, setEditForm] = useState({ department:'', role_code:'', manages_department:'' })
 
   const supabase = createClient()
 
@@ -41,11 +41,16 @@ export default function UsersPage() {
             role_code: role?.code || '',
             role_name: role?.name || '',
             department: profile.department || '',
+            manages_department: m.manages_department || '',
             entities: [],
           }
         }
         if (company?.code && !userMap[profile.email].entities.includes(company.code)) {
           userMap[profile.email].entities.push(company.code)
+        }
+        // Pick up manages_department from any membership
+        if (m.manages_department && !userMap[profile.email].manages_department) {
+          userMap[profile.email].manages_department = m.manages_department
         }
       })
       setMembers(Object.values(userMap))
@@ -75,12 +80,18 @@ export default function UsersPage() {
     for (const company of targetCompanies) {
       const { data: role } = await supabase.from('roles').select('id').eq('company_id', company.id).eq('code', form.role_code).single()
       if (!role) continue
-      const { error } = await supabase.from('company_members').upsert({ company_id: company.id, user_id: profile.id, role_id: role.id, is_active: true }, { onConflict: 'company_id,user_id' })
+      const { error } = await supabase.from('company_members').upsert({
+        company_id: company.id,
+        user_id: profile.id,
+        role_id: role.id,
+        is_active: true,
+        manages_department: form.manages_department || null,
+      }, { onConflict: 'company_id,user_id' })
       if (!error) successCount++
     }
     setLoading(false)
     setShowForm(false)
-    setForm({ email:'', role_code:'', department:'', entity:'all' })
+    setForm({ email:'', role_code:'', department:'', entity:'all', manages_department:'' })
     await loadAll()
     alert(`User added to ${successCount} ${successCount === 1 ? 'entity' : 'entities'} successfully!`)
   }
@@ -91,11 +102,16 @@ export default function UsersPage() {
     const { data: profile } = await supabase.from('user_profiles').select('id').eq('email', editingUser.email).single()
     if (profile) {
       await supabase.from('user_profiles').update({ department: editForm.department }).eq('id', profile.id)
-      if (editForm.role_code && editForm.role_code !== editingUser.role_code) {
-        for (const company of companies) {
+      for (const company of companies) {
+        if (editForm.role_code && editForm.role_code !== editingUser.role_code) {
           const { data: role } = await supabase.from('roles').select('id').eq('company_id', company.id).eq('code', editForm.role_code).single()
-          if (!role) continue
-          await supabase.from('company_members').update({ role_id: role.id }).eq('company_id', company.id).eq('user_id', profile.id)
+          if (role) {
+            await supabase.from('company_members').update({ role_id: role.id, manages_department: editForm.manages_department || null })
+              .eq('company_id', company.id).eq('user_id', profile.id)
+          }
+        } else {
+          await supabase.from('company_members').update({ manages_department: editForm.manages_department || null })
+            .eq('company_id', company.id).eq('user_id', profile.id)
         }
       }
     }
@@ -120,6 +136,8 @@ export default function UsersPage() {
   const lbl: React.CSSProperties = { display:'block', fontSize:'12px', fontWeight:'500', color:'#6b7280', marginBottom:'4px' }
   const selectedEntityName = form.entity === 'all' ? `all ${companies.length} entities` : companies.find(c => c.id === form.entity)?.code || ''
 
+  const isApprover = (code: string) => ['L1_CHECKER','L2_CHECKER','L3_CHECKER','SUPER_ADMIN','ADMIN'].includes(code)
+
   return (
     <div style={{ fontFamily:'sans-serif', padding:'32px', maxWidth:'1100px', margin:'0 auto' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'24px' }}>
@@ -133,11 +151,18 @@ export default function UsersPage() {
         </button>
       </div>
 
+      {/* How routing works */}
+      <div style={{ padding:'14px 18px', background:'#f5f3ff', border:'1px solid #ddd6fe', borderRadius:'10px', marginBottom:'20px', fontSize:'13px', color:'#5b21b6' }}>
+        <strong>How approval routing works:</strong> When a Maker submits a PO, it goes to the approver who manages their department. 
+        Set the <strong>Manages Department</strong> field on each approver so POs route correctly.
+        If no department match is found, POs go to all approvers with that role.
+      </div>
+
       <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:'12px', overflow:'hidden' }}>
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'14px' }}>
           <thead style={{ background:'#f9fafb' }}>
             <tr>
-              {['User','Email','Department','Role','Entities','Status','Actions'].map(h => (
+              {['User','Email','Department','Role','Manages Dept','Entities','Actions'].map(h => (
                 <th key={h} style={{ padding:'12px 16px', textAlign:'left', fontSize:'12px', fontWeight:'600', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.4px', borderBottom:'1px solid #e5e7eb' }}>{h}</th>
               ))}
             </tr>
@@ -159,6 +184,15 @@ export default function UsersPage() {
                   </span>
                 </td>
                 <td style={{ padding:'12px 16px' }}>
+                  {isApprover(m.role_code) ? (
+                    m.manages_department
+                      ? <span style={{ fontSize:'12px', padding:'3px 8px', borderRadius:'20px', background:'#f0fdf4', color:'#16a34a', fontWeight:'500' }}>
+                          {m.manages_department}
+                        </span>
+                      : <span style={{ fontSize:'12px', color:'#f59e0b', fontStyle:'italic' }}>Not set</span>
+                  ) : <span style={{ color:'#d1d5db', fontSize:'12px' }}>—</span>}
+                </td>
+                <td style={{ padding:'12px 16px' }}>
                   <div style={{ display:'flex', gap:'4px', flexWrap:'wrap' }}>
                     {m.entities.map((e: string) => (
                       <span key={e} style={{ fontSize:'10px', padding:'2px 6px', borderRadius:'4px', background:'#ede9fe', color:'#7c3aed', fontWeight:'600' }}>{e}</span>
@@ -166,11 +200,8 @@ export default function UsersPage() {
                   </div>
                 </td>
                 <td style={{ padding:'12px 16px' }}>
-                  <span style={{ padding:'3px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:'500', background:'#f0fdf4', color:'#16a34a' }}>Active</span>
-                </td>
-                <td style={{ padding:'12px 16px' }}>
                   <div style={{ display:'flex', gap:'6px' }}>
-                    <button onClick={() => { setEditingUser(m); setEditForm({ department: m.department, role_code: m.role_code }) }}
+                    <button onClick={() => { setEditingUser(m); setEditForm({ department: m.department, role_code: m.role_code, manages_department: m.manages_department || '' }) }}
                       style={{ fontSize:'12px', padding:'4px 10px', border:'1px solid #9B72F5', borderRadius:'6px', background:'#f5f3ff', color:'#7c3aed', cursor:'pointer' }}>
                       Edit
                     </button>
@@ -193,7 +224,7 @@ export default function UsersPage() {
       {/* Edit User Modal */}
       {editingUser && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }}>
-          <div style={{ background:'#fff', borderRadius:'16px', width:'440px', maxWidth:'94vw', padding:'28px' }}>
+          <div style={{ background:'#fff', borderRadius:'16px', width:'460px', maxWidth:'94vw', padding:'28px' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px' }}>
               <div>
                 <h2 style={{ fontSize:'18px', fontWeight:'600', marginBottom:'2px' }}>Edit User</h2>
@@ -203,18 +234,30 @@ export default function UsersPage() {
             </div>
             <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
               <div>
-                <label style={lbl}>Department</label>
+                <label style={lbl}>Department (user's own department)</label>
                 <select style={inp} value={editForm.department} onChange={e => setEditForm({...editForm, department:e.target.value})}>
                   <option value="">Select department...</option>
                   {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
               <div>
-                <label style={lbl}>Role (updates across all entities)</label>
+                <label style={lbl}>Role</label>
                 <select style={inp} value={editForm.role_code} onChange={e => setEditForm({...editForm, role_code:e.target.value})}>
                   {roles.map(r => <option key={r.code} value={r.code}>{r.name}</option>)}
                 </select>
               </div>
+              {isApprover(editForm.role_code) && (
+                <div style={{ background:'#fffbeb', border:'1px solid #fde68a', borderRadius:'8px', padding:'12px' }}>
+                  <label style={{ ...lbl, color:'#92400e' }}>Manages Department</label>
+                  <select style={inp} value={editForm.manages_department} onChange={e => setEditForm({...editForm, manages_department:e.target.value})}>
+                    <option value="">All departments (receives all POs)</option>
+                    {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                  <p style={{ fontSize:'11px', color:'#92400e', marginTop:'6px' }}>
+                    POs from makers in this department will route to this approver first.
+                  </p>
+                </div>
+              )}
             </div>
             <div style={{ display:'flex', gap:'10px', marginTop:'24px', justifyContent:'flex-end' }}>
               <button onClick={() => setEditingUser(null)}
@@ -255,7 +298,7 @@ export default function UsersPage() {
                 </select>
               </div>
               <div>
-                <label style={lbl}>Department</label>
+                <label style={lbl}>Department (user's own department)</label>
                 <select style={inp} value={form.department} onChange={e => setForm({...form, department:e.target.value})}>
                   <option value="">Select department...</option>
                   {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -268,6 +311,18 @@ export default function UsersPage() {
                   {roles.map(r => <option key={r.code} value={r.code}>{r.name}</option>)}
                 </select>
               </div>
+              {isApprover(form.role_code) && (
+                <div style={{ background:'#fffbeb', border:'1px solid #fde68a', borderRadius:'8px', padding:'12px' }}>
+                  <label style={{ ...lbl, color:'#92400e' }}>Manages Department</label>
+                  <select style={inp} value={form.manages_department} onChange={e => setForm({...form, manages_department:e.target.value})}>
+                    <option value="">All departments (receives all POs)</option>
+                    {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                  <p style={{ fontSize:'11px', color:'#92400e', marginTop:'6px' }}>
+                    POs from makers in this department will route to this approver first.
+                  </p>
+                </div>
+              )}
             </div>
             <div style={{ display:'flex', gap:'10px', marginTop:'24px', justifyContent:'flex-end' }}>
               <button onClick={() => setShowForm(false)} style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>Cancel</button>
