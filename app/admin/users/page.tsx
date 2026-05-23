@@ -243,7 +243,14 @@ export default function UsersPage() {
               </div>
 
               <div>
-                <label style={lbl}>Department</label>
+  <label style={lbl}>Entity Access</label>
+  <select style={inp} value={form.entity} onChange={e => setForm({...form, entity:e.target.value})}>
+    <option value="all">All Entities ({companies.length})</option>
+    {companies.map(c => (
+      <option key={c.id} value={c.id}>{c.code} — {c.name}</option>
+    ))}
+  </select>
+</div>
                 <select style={inp} value={form.department} onChange={e => setForm({...form, department:e.target.value})}>
                   <option value="">Select department...</option>
                   {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
