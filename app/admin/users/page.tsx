@@ -9,9 +9,11 @@ export default function UsersPage() {
   const [companies, setCompanies] = useState<any[]>([])
   const [roles, setRoles] = useState<any[]>([])
   const [showForm, setShowForm] = useState(false)
+  const [editingUser, setEditingUser] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
   const [form, setForm] = useState({ email:'', role_code:'', department:'', entity:'all' })
+  const [editForm, setEditForm] = useState({ department:'', role_code:'' })
 
   const supabase = createClient()
 
@@ -22,12 +24,9 @@ export default function UsersPage() {
     try {
       const { data: cos } = await supabase.from('companies').select('*').order('name')
       setCompanies(cos || [])
-
       const { data: cms } = await supabase.from('company_members').select('*').eq('is_active', true)
       const { data: profiles } = await supabase.from('user_profiles').select('*')
       const { data: allRoles } = await supabase.from('roles').select('*')
-
-      console.log('cms:', cms?.length, 'profiles:', profiles?.length, 'roles:', allRoles?.length)
 
       const userMap: Record<string, any> = {}
       ;(cms || []).forEach((m: any) => {
@@ -49,18 +48,13 @@ export default function UsersPage() {
           userMap[profile.email].entities.push(company.code)
         }
       })
-
-      const result = Object.values(userMap)
-      console.log('users built:', result.length)
-      setMembers(result)
+      setMembers(Object.values(userMap))
 
       if (cos?.length) {
         const { data: roleList } = await supabase.from('roles').select('id, name, code').eq('company_id', cos[0].id).order('name')
         setRoles(roleList || [])
       }
-    } catch(e) {
-      console.error('loadAll error:', e)
-    }
+    } catch(e) { console.error(e) }
     setPageLoading(false)
   }
 
@@ -91,22 +85,30 @@ export default function UsersPage() {
     alert(`User added to ${successCount} ${successCount === 1 ? 'entity' : 'entities'} successfully!`)
   }
 
+  async function handleEditSave() {
+    if (!editingUser) return
+    setLoading(true)
+    const { data: profile } = await supabase.from('user_profiles').select('id').eq('email', editingUser.email).single()
+    if (profile) {
+      await supabase.from('user_profiles').update({ department: editForm.department }).eq('id', profile.id)
+      if (editForm.role_code && editForm.role_code !== editingUser.role_code) {
+        for (const company of companies) {
+          const { data: role } = await supabase.from('roles').select('id').eq('company_id', company.id).eq('code', editForm.role_code).single()
+          if (!role) continue
+          await supabase.from('company_members').update({ role_id: role.id }).eq('company_id', company.id).eq('user_id', profile.id)
+        }
+      }
+    }
+    setLoading(false)
+    setEditingUser(null)
+    await loadAll()
+  }
+
   async function deactivateUser(email: string) {
     if (!confirm(`Deactivate ${email} from all entities?`)) return
     const { data: profile } = await supabase.from('user_profiles').select('id').eq('email', email).single()
     if (!profile) return
     await supabase.from('company_members').update({ is_active: false }).eq('user_id', profile.id)
-    await loadAll()
-  }
-
-  async function changeRole(email: string, newRoleCode: string) {
-    const { data: profile } = await supabase.from('user_profiles').select('id').eq('email', email).single()
-    if (!profile) return
-    for (const company of companies) {
-      const { data: role } = await supabase.from('roles').select('id').eq('company_id', company.id).eq('code', newRoleCode).single()
-      if (!role) continue
-      await supabase.from('company_members').update({ role_id: role.id }).eq('company_id', company.id).eq('user_id', profile.id)
-    }
     await loadAll()
   }
 
@@ -151,11 +153,10 @@ export default function UsersPage() {
                 <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{m.email}</td>
                 <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{m.department || '—'}</td>
                 <td style={{ padding:'12px 16px' }}>
-                  <select value={m.role_code || ''} onChange={e => changeRole(m.email, e.target.value)}
-                    style={{ padding:'4px 8px', borderRadius:'6px', border:'1px solid #e5e7eb', fontSize:'12px', fontFamily:'sans-serif', cursor:'pointer',
-                      background:(roleColors[m.role_code]||'#6b7280')+'15', color:roleColors[m.role_code]||'#6b7280', fontWeight:'600' }}>
-                    {roles.map(r => <option key={r.code} value={r.code}>{r.name}</option>)}
-                  </select>
+                  <span style={{ padding:'4px 10px', borderRadius:'6px', fontSize:'12px', fontWeight:'600',
+                    background:(roleColors[m.role_code]||'#6b7280')+'15', color:roleColors[m.role_code]||'#6b7280' }}>
+                    {m.role_name}
+                  </span>
                 </td>
                 <td style={{ padding:'12px 16px' }}>
                   <div style={{ display:'flex', gap:'4px', flexWrap:'wrap' }}>
@@ -168,10 +169,16 @@ export default function UsersPage() {
                   <span style={{ padding:'3px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:'500', background:'#f0fdf4', color:'#16a34a' }}>Active</span>
                 </td>
                 <td style={{ padding:'12px 16px' }}>
-                  <button onClick={() => deactivateUser(m.email)}
-                    style={{ fontSize:'12px', padding:'4px 10px', border:'1px solid #fecaca', borderRadius:'6px', background:'#fff', color:'#dc2626', cursor:'pointer' }}>
-                    Deactivate
-                  </button>
+                  <div style={{ display:'flex', gap:'6px' }}>
+                    <button onClick={() => { setEditingUser(m); setEditForm({ department: m.department, role_code: m.role_code }) }}
+                      style={{ fontSize:'12px', padding:'4px 10px', border:'1px solid #9B72F5', borderRadius:'6px', background:'#f5f3ff', color:'#7c3aed', cursor:'pointer' }}>
+                      Edit
+                    </button>
+                    <button onClick={() => deactivateUser(m.email)}
+                      style={{ fontSize:'12px', padding:'4px 10px', border:'1px solid #fecaca', borderRadius:'6px', background:'#fff', color:'#dc2626', cursor:'pointer' }}>
+                      Deactivate
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -183,6 +190,47 @@ export default function UsersPage() {
         <strong>How to add a new user:</strong> Ask them to log in at <strong>https://procureiq-gdja.onrender.com/auth/login</strong> first, then click + Add User.
       </div>
 
+      {/* Edit User Modal */}
+      {editingUser && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }}>
+          <div style={{ background:'#fff', borderRadius:'16px', width:'440px', maxWidth:'94vw', padding:'28px' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px' }}>
+              <div>
+                <h2 style={{ fontSize:'18px', fontWeight:'600', marginBottom:'2px' }}>Edit User</h2>
+                <p style={{ fontSize:'12px', color:'#6b7280', margin:0 }}>{editingUser.full_name} — {editingUser.email}</p>
+              </div>
+              <button onClick={() => setEditingUser(null)} style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#6b7280' }}>X</button>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
+              <div>
+                <label style={lbl}>Department</label>
+                <select style={inp} value={editForm.department} onChange={e => setEditForm({...editForm, department:e.target.value})}>
+                  <option value="">Select department...</option>
+                  {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={lbl}>Role (updates across all entities)</label>
+                <select style={inp} value={editForm.role_code} onChange={e => setEditForm({...editForm, role_code:e.target.value})}>
+                  {roles.map(r => <option key={r.code} value={r.code}>{r.name}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ display:'flex', gap:'10px', marginTop:'24px', justifyContent:'flex-end' }}>
+              <button onClick={() => setEditingUser(null)}
+                style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>
+                Cancel
+              </button>
+              <button onClick={handleEditSave} disabled={loading}
+                style={{ padding:'9px 18px', border:'none', borderRadius:'8px', background:'#9B72F5', color:'#fff', fontSize:'14px', fontWeight:'500', cursor:'pointer' }}>
+                {loading ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add User Modal */}
       {showForm && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }}>
           <div style={{ background:'#fff', borderRadius:'16px', width:'480px', maxWidth:'94vw', padding:'28px' }}>
