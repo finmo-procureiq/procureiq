@@ -1,14 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { createClient } from '@supabase/supabase-js'
+import { createClient } from '@/lib/supabase/browser'
 
 const DEPARTMENTS = ['IT','Finance','HR','GatewayOps','Compliance','FinOps','RevOps','Customer Success','Legal','Marketing','Sales','Admin']
-
-// Use service role to bypass RLS for admin queries
-const adminClient = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
 
 export default function UsersPage() {
   const [members, setMembers] = useState<any[]>([])
@@ -19,103 +13,77 @@ export default function UsersPage() {
   const [pageLoading, setPageLoading] = useState(true)
   const [form, setForm] = useState({ email:'', role_code:'', department:'', entity:'all' })
 
-  const supabase = adminClient
+  const supabase = createClient()
 
   useEffect(() => { loadAll() }, [])
 
   async function loadAll() {
     setPageLoading(true)
+    try {
+      const { data: cos } = await supabase.from('companies').select('*').order('name')
+      setCompanies(cos || [])
 
-    const { data: cos } = await supabase.from('companies')
-      .select('id, name, code, currency').order('name')
-    setCompanies(cos || [])
-    if (!cos?.length) { setPageLoading(false); return }
+      const { data: cms } = await supabase.from('company_members').select('*').eq('is_active', true)
+      const { data: profiles } = await supabase.from('user_profiles').select('*')
+      const { data: allRoles } = await supabase.from('roles').select('*')
 
-    const { data: allMembers, error } = await supabase
-      .from('company_members')
-      .select('id, is_active, company_id, user_id, role_id')
-      .eq('is_active', true)
+      console.log('cms:', cms?.length, 'profiles:', profiles?.length, 'roles:', allRoles?.length)
 
-    if (error) { console.error('members error:', error); setPageLoading(false); return }
-
-    // Get all user profiles
-    const { data: profiles } = await supabase
-      .from('user_profiles')
-      .select('id, full_name, email, department')
-
-    // Get all roles
-    const { data: allRoles } = await supabase
-      .from('roles')
-      .select('id, name, code, company_id')
-
-    const userMap: Record<string, any> = {}
-    ;(allMembers || []).forEach((m: any) => {
-      const profile = profiles?.find(p => p.id === m.user_id)
-      const role = allRoles?.find(r => r.id === m.role_id)
-      const company = cos.find(c => c.id === m.company_id)
-      if (!profile?.email) return
-      if (!userMap[profile.email]) {
-        userMap[profile.email] = {
-          email: profile.email,
-          full_name: profile.full_name,
-          role_name: role?.name,
-          role_code: role?.code,
-          department: profile.department || '',
-          entities: [],
+      const userMap: Record<string, any> = {}
+      ;(cms || []).forEach((m: any) => {
+        const profile = (profiles || []).find((p: any) => p.id === m.user_id)
+        const role = (allRoles || []).find((r: any) => r.id === m.role_id)
+        const company = (cos || []).find((c: any) => c.id === m.company_id)
+        if (!profile?.email) return
+        if (!userMap[profile.email]) {
+          userMap[profile.email] = {
+            email: profile.email,
+            full_name: profile.full_name,
+            role_code: role?.code || '',
+            role_name: role?.name || '',
+            department: profile.department || '',
+            entities: [],
+          }
         }
-      }
-      if (company?.code && !userMap[profile.email].entities.includes(company.code)) {
-        userMap[profile.email].entities.push(company.code)
-      }
-    })
-    setMembers(Object.values(userMap))
+        if (company?.code && !userMap[profile.email].entities.includes(company.code)) {
+          userMap[profile.email].entities.push(company.code)
+        }
+      })
 
-    // Load roles for first company (for role selector)
-    const { data: roleList } = await supabase
-      .from('roles').select('id, name, code')
-      .eq('company_id', cos[0].id).order('name')
-    setRoles(roleList || [])
+      const result = Object.values(userMap)
+      console.log('users built:', result.length)
+      setMembers(result)
+
+      if (cos?.length) {
+        const { data: roleList } = await supabase.from('roles').select('id, name, code').eq('company_id', cos[0].id).order('name')
+        setRoles(roleList || [])
+      }
+    } catch(e) {
+      console.error('loadAll error:', e)
+    }
     setPageLoading(false)
   }
 
   async function handleAddUser() {
     if (!form.email || !form.role_code) return
     setLoading(true)
-
-    const { data: profile } = await supabase
-      .from('user_profiles').select('id')
-      .eq('email', form.email.toLowerCase().trim()).single()
-
+    const { data: profile } = await supabase.from('user_profiles').select('id').eq('email', form.email.toLowerCase().trim()).single()
     if (!profile) {
       alert('User not found. Ask them to log in at https://procureiq-gdja.onrender.com/auth/login first.')
       setLoading(false)
       return
     }
-
     if (form.department) {
-      await supabase.from('user_profiles')
-        .update({ department: form.department })
-        .eq('id', profile.id)
+      await supabase.from('user_profiles').update({ department: form.department }).eq('id', profile.id)
     }
-
-    const targetCompanies = form.entity === 'all'
-      ? companies
-      : companies.filter(c => c.id === form.entity)
-
+    const targetCompanies = form.entity === 'all' ? companies : companies.filter(c => c.id === form.entity)
     let successCount = 0
     for (const company of targetCompanies) {
-      const { data: role } = await supabase.from('roles').select('id')
-        .eq('company_id', company.id).eq('code', form.role_code).single()
+      const { data: role } = await supabase.from('roles').select('id').eq('company_id', company.id).eq('code', form.role_code).single()
       if (!role) continue
-      const { error } = await supabase.from('company_members').upsert({
-        company_id: company.id,
-        user_id: profile.id,
-        role_id: role.id,
-        is_active: true,
-      }, { onConflict: 'company_id,user_id' })
+      const { error } = await supabase.from('company_members').upsert({ company_id: company.id, user_id: profile.id, role_id: role.id, is_active: true }, { onConflict: 'company_id,user_id' })
       if (!error) successCount++
     }
-
     setLoading(false)
     setShowForm(false)
     setForm({ email:'', role_code:'', department:'', entity:'all' })
@@ -125,24 +93,19 @@ export default function UsersPage() {
 
   async function deactivateUser(email: string) {
     if (!confirm(`Deactivate ${email} from all entities?`)) return
-    const { data: profile } = await supabase
-      .from('user_profiles').select('id').eq('email', email).single()
+    const { data: profile } = await supabase.from('user_profiles').select('id').eq('email', email).single()
     if (!profile) return
-    await supabase.from('company_members')
-      .update({ is_active: false }).eq('user_id', profile.id)
+    await supabase.from('company_members').update({ is_active: false }).eq('user_id', profile.id)
     await loadAll()
   }
 
   async function changeRole(email: string, newRoleCode: string) {
-    const { data: profile } = await supabase
-      .from('user_profiles').select('id').eq('email', email).single()
+    const { data: profile } = await supabase.from('user_profiles').select('id').eq('email', email).single()
     if (!profile) return
     for (const company of companies) {
-      const { data: role } = await supabase.from('roles').select('id')
-        .eq('company_id', company.id).eq('code', newRoleCode).single()
+      const { data: role } = await supabase.from('roles').select('id').eq('company_id', company.id).eq('code', newRoleCode).single()
       if (!role) continue
-      await supabase.from('company_members').update({ role_id: role.id })
-        .eq('company_id', company.id).eq('user_id', profile.id)
+      await supabase.from('company_members').update({ role_id: role.id }).eq('company_id', company.id).eq('user_id', profile.id)
     }
     await loadAll()
   }
@@ -151,7 +114,6 @@ export default function UsersPage() {
     SUPER_ADMIN:'#7c3aed', ADMIN:'#2563eb', L1_CHECKER:'#f59e0b',
     L2_CHECKER:'#ea580c', L3_CHECKER:'#dc2626', MAKER:'#16a34a', VIEWER:'#6b7280'
   }
-
   const inp: React.CSSProperties = { width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:'8px', fontFamily:'sans-serif', fontSize:'13px', outline:'none', boxSizing:'border-box' }
   const lbl: React.CSSProperties = { display:'block', fontSize:'12px', fontWeight:'500', color:'#6b7280', marginBottom:'4px' }
   const selectedEntityName = form.entity === 'all' ? `all ${companies.length} entities` : companies.find(c => c.id === form.entity)?.code || ''
@@ -234,9 +196,7 @@ export default function UsersPage() {
             <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
               <div>
                 <label style={lbl}>Email Address *</label>
-                <input style={inp} type="email" value={form.email}
-                  onChange={e => setForm({...form, email:e.target.value})}
-                  placeholder="name@finmo.net"/>
+                <input style={inp} type="email" value={form.email} onChange={e => setForm({...form, email:e.target.value})} placeholder="name@finmo.net"/>
                 <p style={{ fontSize:'11px', color:'#9ca3af', marginTop:'4px' }}>User must have logged in with Google first</p>
               </div>
               <div>
@@ -260,25 +220,11 @@ export default function UsersPage() {
                   {roles.map(r => <option key={r.code} value={r.code}>{r.name}</option>)}
                 </select>
               </div>
-              {form.role_code && (
-                <div style={{ padding:'10px 14px', background:'#f5f3ff', border:'1px solid #ddd6fe', borderRadius:'8px', fontSize:'12px', color:'#5b21b6' }}>
-                  {form.role_code === 'MAKER' && 'Can create and submit purchase orders'}
-                  {form.role_code === 'L1_CHECKER' && 'Dept Head — first level approval'}
-                  {form.role_code === 'L2_CHECKER' && 'Finance Manager — second level approval'}
-                  {form.role_code === 'L3_CHECKER' && 'CFO — final escalation approval'}
-                  {form.role_code === 'VIEWER' && 'Read only — cannot create or approve'}
-                  {form.role_code === 'SUPER_ADMIN' && 'Full access to everything'}
-                </div>
-              )}
             </div>
             <div style={{ display:'flex', gap:'10px', marginTop:'24px', justifyContent:'flex-end' }}>
-              <button onClick={() => setShowForm(false)}
-                style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>
-                Cancel
-              </button>
+              <button onClick={() => setShowForm(false)} style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>Cancel</button>
               <button onClick={handleAddUser} disabled={loading || !form.email || !form.role_code}
-                style={{ padding:'9px 18px', border:'none', borderRadius:'8px', fontSize:'14px', fontWeight:'500', cursor:'pointer', color:'#fff',
-                  background: !form.email||!form.role_code ? '#c4b5fd' : '#9B72F5' }}>
+                style={{ padding:'9px 18px', border:'none', borderRadius:'8px', fontSize:'14px', fontWeight:'500', cursor:'pointer', color:'#fff', background: !form.email||!form.role_code ? '#c4b5fd' : '#9B72F5' }}>
                 {loading ? 'Adding...' : `Add to ${selectedEntityName}`}
               </button>
             </div>
