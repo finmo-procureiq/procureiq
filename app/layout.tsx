@@ -102,7 +102,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <select
                   value={activeCompany?.id || ''}
                   onChange={e => switchCompany(e.target.value)}
-                  style={{ width:'100%', background:'rgba(255,255,255,0.1)', border:'1px solid rgba(196,176,240,0.3)', borderRadius:'8px', color:'#fff', padding:'7px 10px', fontSize:'12px', fontFamily:'sans-serif', cursor:'pointer', outline:'none' }}>
+                  style={{ width:'100%', background:'rgba(255,255,255,0.15)', border:'1px solid rgba(196,176,240,0.4)', borderRadius:'8px', color:'#fff', padding:'7px 10px', fontSize:'12px', fontFamily:'sans-serif', cursor:'pointer', outline:'none', appearance:'auto' }}>'#fff', padding:'7px 10px', fontSize:'12px', fontFamily:'sans-serif', cursor:'pointer', outline:'none' }}>
                   {companies.map(c => (
                     <option key={c.id} value={c.id} style={{ background:'#3C2B5A', color:'#fff' }}>
                       {c.name} ({c.currency})
