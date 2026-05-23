@@ -13,7 +13,7 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
   const [form, setForm] = useState({ email:'', role_code:'', department:'', entity:'all', manages_department:'' })
-  const [editForm, setEditForm] = useState({ department:'', role_code:'', manages_department:'' })
+  const [editForm, setEditForm] = useState({ department:'', role_code:'', manages_department:'', add_entity:'' })
 
   const supabase = createClient()
 
@@ -41,15 +41,16 @@ export default function UsersPage() {
             role_code: role?.code || '',
             role_name: role?.name || '',
             department: profile.department || '',
-            manages_department: m.manages_department || '',
+            manages_department: '',
             entities: [],
+            entity_ids: [],
           }
         }
         if (company?.code && !userMap[profile.email].entities.includes(company.code)) {
           userMap[profile.email].entities.push(company.code)
+          userMap[profile.email].entity_ids.push(company.id)
         }
-        // Pick up manages_department from any membership
-        if (m.manages_department && !userMap[profile.email].manages_department) {
+        if (m.manages_department) {
           userMap[profile.email].manages_department = m.manages_department
         }
       })
@@ -81,11 +82,8 @@ export default function UsersPage() {
       const { data: role } = await supabase.from('roles').select('id').eq('company_id', company.id).eq('code', form.role_code).single()
       if (!role) continue
       const { error } = await supabase.from('company_members').upsert({
-        company_id: company.id,
-        user_id: profile.id,
-        role_id: role.id,
-        is_active: true,
-        manages_department: form.manages_department || null,
+        company_id: company.id, user_id: profile.id, role_id: role.id,
+        is_active: true, manages_department: form.manages_department || null,
       }, { onConflict: 'company_id,user_id' })
       if (!error) successCount++
     }
@@ -103,15 +101,22 @@ export default function UsersPage() {
     if (profile) {
       await supabase.from('user_profiles').update({ department: editForm.department }).eq('id', profile.id)
       for (const company of companies) {
+        const updates: any = { manages_department: editForm.manages_department || null }
         if (editForm.role_code && editForm.role_code !== editingUser.role_code) {
           const { data: role } = await supabase.from('roles').select('id').eq('company_id', company.id).eq('code', editForm.role_code).single()
-          if (role) {
-            await supabase.from('company_members').update({ role_id: role.id, manages_department: editForm.manages_department || null })
-              .eq('company_id', company.id).eq('user_id', profile.id)
-          }
-        } else {
-          await supabase.from('company_members').update({ manages_department: editForm.manages_department || null })
-            .eq('company_id', company.id).eq('user_id', profile.id)
+          if (role) updates.role_id = role.id
+        }
+        await supabase.from('company_members').update(updates).eq('company_id', company.id).eq('user_id', profile.id)
+      }
+      // Add to new entity if selected
+      if (editForm.add_entity) {
+        const { data: role } = await supabase.from('roles').select('id').eq('company_id', editForm.add_entity).eq('code', editForm.role_code || editingUser.role_code).single()
+        if (role) {
+          await supabase.from('company_members').upsert({
+            company_id: editForm.add_entity, user_id: profile.id,
+            role_id: role.id, is_active: true,
+            manages_department: editForm.manages_department || null,
+          }, { onConflict: 'company_id,user_id' })
         }
       }
     }
@@ -128,6 +133,8 @@ export default function UsersPage() {
     await loadAll()
   }
 
+  const isApprover = (code: string) => ['L1_CHECKER','L2_CHECKER','L3_CHECKER','SUPER_ADMIN','ADMIN'].includes(code)
+
   const roleColors: Record<string,string> = {
     SUPER_ADMIN:'#7c3aed', ADMIN:'#2563eb', L1_CHECKER:'#f59e0b',
     L2_CHECKER:'#ea580c', L3_CHECKER:'#dc2626', MAKER:'#16a34a', VIEWER:'#6b7280'
@@ -135,8 +142,6 @@ export default function UsersPage() {
   const inp: React.CSSProperties = { width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:'8px', fontFamily:'sans-serif', fontSize:'13px', outline:'none', boxSizing:'border-box' }
   const lbl: React.CSSProperties = { display:'block', fontSize:'12px', fontWeight:'500', color:'#6b7280', marginBottom:'4px' }
   const selectedEntityName = form.entity === 'all' ? `all ${companies.length} entities` : companies.find(c => c.id === form.entity)?.code || ''
-
-  const isApprover = (code: string) => ['L1_CHECKER','L2_CHECKER','L3_CHECKER','SUPER_ADMIN','ADMIN'].includes(code)
 
   return (
     <div style={{ fontFamily:'sans-serif', padding:'32px', maxWidth:'1100px', margin:'0 auto' }}>
@@ -151,11 +156,8 @@ export default function UsersPage() {
         </button>
       </div>
 
-      {/* How routing works */}
       <div style={{ padding:'14px 18px', background:'#f5f3ff', border:'1px solid #ddd6fe', borderRadius:'10px', marginBottom:'20px', fontSize:'13px', color:'#5b21b6' }}>
-        <strong>How approval routing works:</strong> When a Maker submits a PO, it goes to the approver who manages their department. 
-        Set the <strong>Manages Department</strong> field on each approver so POs route correctly.
-        If no department match is found, POs go to all approvers with that role.
+        <strong>Approval routing:</strong> POs route to the approver whose <strong>Manages Dept</strong> matches the maker's department. Set this on each approver via Edit.
       </div>
 
       <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:'12px', overflow:'hidden' }}>
@@ -186,22 +188,24 @@ export default function UsersPage() {
                 <td style={{ padding:'12px 16px' }}>
                   {isApprover(m.role_code) ? (
                     m.manages_department
-                      ? <span style={{ fontSize:'12px', padding:'3px 8px', borderRadius:'20px', background:'#f0fdf4', color:'#16a34a', fontWeight:'500' }}>
-                          {m.manages_department}
-                        </span>
+                      ? <span style={{ fontSize:'12px', padding:'3px 8px', borderRadius:'20px', background:'#f0fdf4', color:'#16a34a', fontWeight:'500' }}>{m.manages_department}</span>
                       : <span style={{ fontSize:'12px', color:'#f59e0b', fontStyle:'italic' }}>Not set</span>
-                  ) : <span style={{ color:'#d1d5db', fontSize:'12px' }}>—</span>}
+                  ) : <span style={{ color:'#d1d5db' }}>—</span>}
                 </td>
                 <td style={{ padding:'12px 16px' }}>
                   <div style={{ display:'flex', gap:'4px', flexWrap:'wrap' }}>
-                    {m.entities.map((e: string) => (
-                      <span key={e} style={{ fontSize:'10px', padding:'2px 6px', borderRadius:'4px', background:'#ede9fe', color:'#7c3aed', fontWeight:'600' }}>{e}</span>
+                    {companies.map(c => (
+                      <span key={c.id} style={{ fontSize:'10px', padding:'2px 6px', borderRadius:'4px', fontWeight:'600',
+                        background: m.entities.includes(c.code) ? '#ede9fe' : '#f3f4f6',
+                        color: m.entities.includes(c.code) ? '#7c3aed' : '#d1d5db' }}>
+                        {c.code}
+                      </span>
                     ))}
                   </div>
                 </td>
                 <td style={{ padding:'12px 16px' }}>
                   <div style={{ display:'flex', gap:'6px' }}>
-                    <button onClick={() => { setEditingUser(m); setEditForm({ department: m.department, role_code: m.role_code, manages_department: m.manages_department || '' }) }}
+                    <button onClick={() => { setEditingUser(m); setEditForm({ department: m.department, role_code: m.role_code, manages_department: m.manages_department || '', add_entity:'' }) }}
                       style={{ fontSize:'12px', padding:'4px 10px', border:'1px solid #9B72F5', borderRadius:'6px', background:'#f5f3ff', color:'#7c3aed', cursor:'pointer' }}>
                       Edit
                     </button>
@@ -224,7 +228,7 @@ export default function UsersPage() {
       {/* Edit User Modal */}
       {editingUser && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }}>
-          <div style={{ background:'#fff', borderRadius:'16px', width:'460px', maxWidth:'94vw', padding:'28px' }}>
+          <div style={{ background:'#fff', borderRadius:'16px', width:'480px', maxWidth:'94vw', maxHeight:'90vh', overflowY:'auto', padding:'28px' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px' }}>
               <div>
                 <h2 style={{ fontSize:'18px', fontWeight:'600', marginBottom:'2px' }}>Edit User</h2>
@@ -234,7 +238,7 @@ export default function UsersPage() {
             </div>
             <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
               <div>
-                <label style={lbl}>Department (user's own department)</label>
+                <label style={lbl}>Department</label>
                 <select style={inp} value={editForm.department} onChange={e => setEditForm({...editForm, department:e.target.value})}>
                   <option value="">Select department...</option>
                   {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -250,14 +254,30 @@ export default function UsersPage() {
                 <div style={{ background:'#fffbeb', border:'1px solid #fde68a', borderRadius:'8px', padding:'12px' }}>
                   <label style={{ ...lbl, color:'#92400e' }}>Manages Department</label>
                   <select style={inp} value={editForm.manages_department} onChange={e => setEditForm({...editForm, manages_department:e.target.value})}>
-                    <option value="">All departments (receives all POs)</option>
+                    <option value="">All departments</option>
                     {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
-                  <p style={{ fontSize:'11px', color:'#92400e', marginTop:'6px' }}>
-                    POs from makers in this department will route to this approver first.
-                  </p>
+                  <p style={{ fontSize:'11px', color:'#92400e', marginTop:'6px' }}>POs from this department will route to this approver.</p>
                 </div>
               )}
+              <div style={{ borderTop:'1px solid #f3f4f6', paddingTop:'14px' }}>
+                <label style={lbl}>Add Access to Entity</label>
+                <select style={inp} value={editForm.add_entity} onChange={e => setEditForm({...editForm, add_entity:e.target.value})}>
+                  <option value="">Select entity to add...</option>
+                  {companies.filter(c => !editingUser.entities.includes(c.code)).map(c => (
+                    <option key={c.id} value={c.id}>{c.code} — {c.name}</option>
+                  ))}
+                </select>
+                <div style={{ marginTop:'6px', display:'flex', gap:'4px', flexWrap:'wrap' }}>
+                  {companies.map(c => (
+                    <span key={c.id} style={{ fontSize:'11px', padding:'2px 8px', borderRadius:'20px', fontWeight:'600',
+                      background: editingUser.entities.includes(c.code) ? '#ede9fe' : '#f3f4f6',
+                      color: editingUser.entities.includes(c.code) ? '#7c3aed' : '#9ca3af' }}>
+                      {c.code} {editingUser.entities.includes(c.code) ? '✓' : ''}
+                    </span>
+                  ))}
+                </div>
+              </div>
             </div>
             <div style={{ display:'flex', gap:'10px', marginTop:'24px', justifyContent:'flex-end' }}>
               <button onClick={() => setEditingUser(null)}
@@ -276,7 +296,7 @@ export default function UsersPage() {
       {/* Add User Modal */}
       {showForm && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }}>
-          <div style={{ background:'#fff', borderRadius:'16px', width:'480px', maxWidth:'94vw', padding:'28px' }}>
+          <div style={{ background:'#fff', borderRadius:'16px', width:'480px', maxWidth:'94vw', maxHeight:'90vh', overflowY:'auto', padding:'28px' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px' }}>
               <div>
                 <h2 style={{ fontSize:'18px', fontWeight:'600', marginBottom:'2px' }}>Add New User</h2>
@@ -298,7 +318,7 @@ export default function UsersPage() {
                 </select>
               </div>
               <div>
-                <label style={lbl}>Department (user's own department)</label>
+                <label style={lbl}>Department</label>
                 <select style={inp} value={form.department} onChange={e => setForm({...form, department:e.target.value})}>
                   <option value="">Select department...</option>
                   {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -315,12 +335,10 @@ export default function UsersPage() {
                 <div style={{ background:'#fffbeb', border:'1px solid #fde68a', borderRadius:'8px', padding:'12px' }}>
                   <label style={{ ...lbl, color:'#92400e' }}>Manages Department</label>
                   <select style={inp} value={form.manages_department} onChange={e => setForm({...form, manages_department:e.target.value})}>
-                    <option value="">All departments (receives all POs)</option>
+                    <option value="">All departments</option>
                     {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
-                  <p style={{ fontSize:'11px', color:'#92400e', marginTop:'6px' }}>
-                    POs from makers in this department will route to this approver first.
-                  </p>
+                  <p style={{ fontSize:'11px', color:'#92400e', marginTop:'6px' }}>POs from this department will route to this approver.</p>
                 </div>
               )}
             </div>
