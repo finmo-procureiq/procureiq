@@ -10,7 +10,7 @@ export default function UsersPage() {
   const [roles, setRoles] = useState<any[]>([])
   const [showForm, setShowForm] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [form, setForm] = useState({ email:'', role_code:'', department:'' })
+  const [form, setForm] = useState({ email:'', role_code:'', department:'', entity:'all' })
 
   const supabase = createClient()
 
@@ -28,7 +28,7 @@ export default function UsersPage() {
 
     const { data: allMembers } = await supabase
       .from('company_members')
-      .select('*, user:user_profiles(id, full_name, email), role:roles(id, name, code), company:companies(id, name, code)')
+      .select('*, user:user_profiles(id, full_name, email, department), role:roles(id, name, code), company:companies(id, name, code)')
       .eq('is_active', true)
       .order('created_at', { ascending: false })
 
@@ -42,7 +42,7 @@ export default function UsersPage() {
           full_name: m.user?.full_name,
           role_name: m.role?.name,
           role_code: m.role?.code,
-          department: m.department || '',
+          department: m.user?.department || '',
           entities: [],
         }
       }
@@ -72,15 +72,18 @@ export default function UsersPage() {
       return
     }
 
-    // Update department in user_profiles if provided
     if (form.department) {
       await supabase.from('user_profiles')
         .update({ department: form.department })
         .eq('id', profile.id)
     }
 
+    const targetCompanies = form.entity === 'all'
+      ? companies
+      : companies.filter(c => c.id === form.entity)
+
     let successCount = 0
-    for (const company of companies) {
+    for (const company of targetCompanies) {
       const { data: role } = await supabase.from('roles').select('id')
         .eq('company_id', company.id).eq('code', form.role_code).single()
       if (!role) continue
@@ -95,9 +98,9 @@ export default function UsersPage() {
 
     setLoading(false)
     setShowForm(false)
-    setForm({ email:'', role_code:'', department:'' })
+    setForm({ email:'', role_code:'', department:'', entity:'all' })
     await loadAll()
-    alert(`✅ User added to ${successCount} entities successfully!`)
+    alert(`✅ User added to ${successCount} ${successCount === 1 ? 'entity' : 'entities'} successfully!`)
   }
 
   async function deactivateUser(email: string) {
@@ -132,13 +135,17 @@ export default function UsersPage() {
   const inp: React.CSSProperties = { width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:'8px', fontFamily:'sans-serif', fontSize:'13px', outline:'none', boxSizing:'border-box' }
   const lbl: React.CSSProperties = { display:'block', fontSize:'12px', fontWeight:'500', color:'#6b7280', marginBottom:'4px' }
 
+  const selectedEntityName = form.entity === 'all'
+    ? `all ${companies.length} entities`
+    : companies.find(c => c.id === form.entity)?.code || ''
+
   return (
     <div style={{ fontFamily:'sans-serif', padding:'32px', maxWidth:'1100px', margin:'0 auto' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'24px' }}>
         <div>
           <h1 style={{ fontSize:'24px', fontWeight:'600', marginBottom:'4px' }}>Users & Roles</h1>
           <p style={{ color:'#666', fontSize:'14px', margin:0 }}>
-            Users get access to all {companies.length} entities automatically
+            Manage team members across all {companies.length} entities
           </p>
         </div>
         <button onClick={() => setShowForm(true)}
@@ -208,20 +215,12 @@ export default function UsersPage() {
       {showForm && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }}>
           <div style={{ background:'#fff', borderRadius:'16px', width:'480px', maxWidth:'94vw', padding:'28px' }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'16px' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px' }}>
               <div>
                 <h2 style={{ fontSize:'18px', fontWeight:'600', marginBottom:'2px' }}>Add New User</h2>
-                <p style={{ fontSize:'12px', color:'#6b7280', margin:0 }}>Gets access to all {companies.length} entities automatically</p>
+                <p style={{ fontSize:'12px', color:'#6b7280', margin:0 }}>Select entities to grant access</p>
               </div>
               <button onClick={() => setShowForm(false)} style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#6b7280' }}>X</button>
-            </div>
-
-            <div style={{ display:'flex', gap:'6px', marginBottom:'16px', flexWrap:'wrap' }}>
-              {companies.map(c => (
-                <span key={c.id} style={{ fontSize:'11px', padding:'3px 10px', borderRadius:'20px', background:'#ede9fe', color:'#7c3aed', fontWeight:'600' }}>
-                  {c.code}
-                </span>
-              ))}
             </div>
 
             <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
@@ -231,6 +230,16 @@ export default function UsersPage() {
                   onChange={e => setForm({...form, email:e.target.value})}
                   placeholder="name@finmo.net"/>
                 <p style={{ fontSize:'11px', color:'#9ca3af', marginTop:'4px' }}>User must have logged in with Google first</p>
+              </div>
+
+              <div>
+                <label style={lbl}>Entity Access</label>
+                <select style={inp} value={form.entity} onChange={e => setForm({...form, entity:e.target.value})}>
+                  <option value="all">All Entities ({companies.length})</option>
+                  {companies.map(c => (
+                    <option key={c.id} value={c.id}>{c.code} — {c.name}</option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -271,7 +280,7 @@ export default function UsersPage() {
                 disabled={loading || !form.email || !form.role_code}
                 style={{ padding:'9px 18px', border:'none', borderRadius:'8px', fontSize:'14px', fontWeight:'500', cursor:'pointer', color:'#fff',
                   background: !form.email||!form.role_code ? '#c4b5fd' : '#9B72F5' }}>
-                {loading ? 'Adding...' : `Add to all ${companies.length} entities`}
+                {loading ? 'Adding...' : `Add to ${selectedEntityName}`}
               </button>
             </div>
           </div>
