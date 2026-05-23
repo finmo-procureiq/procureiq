@@ -154,14 +154,6 @@ export default function UsersPage() {
         </button>
       </div>
 
-      <div style={{ display:'flex', gap:'8px', marginBottom:'20px', flexWrap:'wrap' }}>
-        {companies.map(c => (
-          <span key={c.id} style={{ padding:'4px 12px', borderRadius:'20px', fontSize:'12px', fontWeight:'600', background:'#ede9fe', color:'#7c3aed' }}>
-            {c.code} — {c.name}
-          </span>
-        ))}
-      </div>
-
       <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:'12px', overflow:'hidden' }}>
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'14px' }}>
           <thead style={{ background:'#f9fafb' }}>
@@ -218,7 +210,7 @@ export default function UsersPage() {
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px' }}>
               <div>
                 <h2 style={{ fontSize:'18px', fontWeight:'600', marginBottom:'2px' }}>Add New User</h2>
-                <p style={{ fontSize:'12px', color:'#6b7280', margin:0 }}>Select entities to grant access</p>
+                <p style={{ fontSize:'12px', color:'#6b7280', margin:0 }}>Select entity access, department and role</p>
               </div>
               <button onClick={() => setShowForm(false)} style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#6b7280' }}>X</button>
             </div>
@@ -243,14 +235,7 @@ export default function UsersPage() {
               </div>
 
               <div>
-  <label style={lbl}>Entity Access</label>
-  <select style={inp} value={form.entity} onChange={e => setForm({...form, entity:e.target.value})}>
-    <option value="all">All Entities ({companies.length})</option>
-    {companies.map(c => (
-      <option key={c.id} value={c.id}>{c.code} — {c.name}</option>
-    ))}
-  </select>
-</div>
+                <label style={lbl}>Department</label>
                 <select style={inp} value={form.department} onChange={e => setForm({...form, department:e.target.value})}>
                   <option value="">Select department...</option>
                   {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
