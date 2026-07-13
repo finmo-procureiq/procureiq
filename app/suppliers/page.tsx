@@ -10,7 +10,6 @@ export default function SuppliersPage() {
   const [loading, setLoading] = useState(false)
   const [filter, setFilter] = useState('all')
   const [companyId, setCompanyId] = useState('')
-  const [userId, setUserId] = useState('')
   const [uploadingDoc, setUploadingDoc] = useState(false)
   const [supplierDocs, setSupplierDocs] = useState<any[]>([])
   const [form, setForm] = useState({
@@ -25,9 +24,6 @@ export default function SuppliersPage() {
   useEffect(() => { if (companyId) loadSuppliers() }, [companyId, filter])
 
   async function init() {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    setUserId(user.id)
     const cid = await getActiveCompanyId()
     setCompanyId(cid)
   }
@@ -51,6 +47,8 @@ export default function SuppliersPage() {
   async function handleSubmit() {
     if (!form.name || !form.category) return
     setLoading(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { alert('Not logged in'); setLoading(false); return }
     const { error } = await supabase.from('suppliers').insert({
       company_id: companyId,
       name: form.name, category: form.category,
@@ -59,7 +57,7 @@ export default function SuppliersPage() {
       payment_terms: parseInt(form.payment_terms) || 30,
       credit_limit: form.credit_limit ? parseFloat(form.credit_limit) : null,
       bank_details: { bank_name: form.bank_name, account_number: form.account_number, ifsc: form.ifsc },
-      status: 'pending', created_by: userId,
+      status: 'pending', created_by: user.id,
     })
     setLoading(false)
     if (error) { alert('Error: ' + error.message); return }
@@ -69,8 +67,10 @@ export default function SuppliersPage() {
   }
 
   async function approveSupplier(id: string) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
     await supabase.from('suppliers').update({
-      status: 'approved', approved_by: userId, approved_at: new Date().toISOString()
+      status: 'approved', approved_by: user.id, approved_at: new Date().toISOString()
     }).eq('id', id)
     setSelected((prev: any) => ({ ...prev, status: 'approved' }))
     loadSuppliers()
@@ -79,18 +79,14 @@ export default function SuppliersPage() {
   async function handleDocUpload(supplierId: string, file: File) {
     setUploadingDoc(true)
     const path = `suppliers/${supplierId}/${Date.now()}_${file.name}`
-    const { error } = await supabase.storage
-      .from('procureiq-docs')
-      .upload(path, file)
+    const { error } = await supabase.storage.from('procureiq-docs').upload(path, file)
     setUploadingDoc(false)
     if (error) { alert('Upload error: ' + error.message); return }
     loadSupplierDocs(supplierId)
   }
 
   async function handleDocDelete(supplierId: string, fileName: string) {
-    await supabase.storage
-      .from('procureiq-docs')
-      .remove([`suppliers/${supplierId}/${fileName}`])
+    await supabase.storage.from('procureiq-docs').remove([`suppliers/${supplierId}/${fileName}`])
     loadSupplierDocs(supplierId)
   }
 
@@ -117,7 +113,7 @@ export default function SuppliersPage() {
           <p style={{ color:'#666', fontSize:'14px' }}>Manage your approved vendor list</p>
         </div>
         <button onClick={() => setShowForm(true)}
-          style={{ background:'#2563eb', color:'#fff', border:'none', borderRadius:'8px', padding:'10px 18px', fontSize:'14px', fontWeight:'500', cursor:'pointer' }}>
+          style={{ background:'#9B72F5', color:'#fff', border:'none', borderRadius:'8px', padding:'10px 18px', fontSize:'14px', fontWeight:'500', cursor:'pointer' }}>
           + Add Supplier
         </button>
       </div>
@@ -125,7 +121,7 @@ export default function SuppliersPage() {
       <div style={{ display:'flex', gap:'8px', marginBottom:'16px' }}>
         {[['all','All'],['approved','Approved'],['pending','Pending'],['under_review','Under Review'],['blacklisted','Blacklisted']].map(([val,label]) => (
           <button key={val} onClick={() => setFilter(val)}
-            style={{ padding:'6px 14px', borderRadius:'20px', border:'1px solid #e5e7eb', background:filter===val?'#2563eb':'#fff', color:filter===val?'#fff':'#374151', fontSize:'13px', cursor:'pointer' }}>
+            style={{ padding:'6px 14px', borderRadius:'20px', border:'1px solid #e5e7eb', background:filter===val?'#9B72F5':'#fff', color:filter===val?'#fff':'#374151', fontSize:'13px', cursor:'pointer' }}>
             {label}
           </button>
         ))}
@@ -204,7 +200,7 @@ export default function SuppliersPage() {
             <div style={{ display:'flex', gap:'10px', marginTop:'20px', justifyContent:'flex-end' }}>
               <button onClick={() => setShowForm(false)} style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>Cancel</button>
               <button onClick={handleSubmit} disabled={loading || !form.name || !form.category}
-                style={{ padding:'9px 18px', border:'none', borderRadius:'8px', background:loading||!form.name||!form.category?'#93c5fd':'#2563eb', color:'#fff', fontSize:'14px', fontWeight:'500', cursor:'pointer' }}>
+                style={{ padding:'9px 18px', border:'none', borderRadius:'8px', background:loading||!form.name||!form.category?'#c4b5fd':'#9B72F5', color:'#fff', fontSize:'14px', fontWeight:'500', cursor:'pointer' }}>
                 {loading ? 'Saving...' : 'Add Supplier'}
               </button>
             </div>
@@ -220,8 +216,6 @@ export default function SuppliersPage() {
               <h2 style={{ fontSize:'18px', fontWeight:'600' }}>{selected.name}</h2>
               <button onClick={() => { setSelected(null); setSupplierDocs([]) }} style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#6b7280' }}>X</button>
             </div>
-
-            {/* Supplier Details */}
             <div style={{ display:'grid', gap:'2px', fontSize:'14px', marginBottom:'20px' }}>
               {[
                 ['Category', selected.category],
@@ -242,60 +236,42 @@ export default function SuppliersPage() {
                 </div>
               ))}
             </div>
-
-            {/* Documents Section */}
             <div style={{ borderTop:'2px solid #f3f4f6', paddingTop:'16px', marginBottom:'16px' }}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'12px' }}>
                 <div style={{ fontSize:'13px', fontWeight:'600', color:'#374151' }}>Documents</div>
                 <label style={{ padding:'6px 12px', background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:'6px', fontSize:'12px', cursor:'pointer', color:'#374151' }}>
                   {uploadingDoc ? 'Uploading...' : '+ Attach File'}
-                  <input type="file" style={{ display:'none' }}
-                    accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
+                  <input type="file" style={{ display:'none' }} accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
                     onChange={e => { if (e.target.files?.[0]) handleDocUpload(selected.id, e.target.files[0]) }}/>
                 </label>
               </div>
-
               {supplierDocs.length === 0 ? (
                 <div style={{ padding:'16px', background:'#f9fafb', borderRadius:'8px', textAlign:'center', fontSize:'13px', color:'#9ca3af' }}>
-                  No documents attached. Upload contracts, NDAs, registration certificates etc.
+                  No documents attached.
                 </div>
               ) : (
                 <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
                   {supplierDocs.map(doc => (
                     <div key={doc.name} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 12px', background:'#f9fafb', borderRadius:'8px', fontSize:'13px' }}>
                       <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-                        <span style={{ fontSize:'16px' }}>
-                          {doc.name.endsWith('.pdf') ? '📄' : doc.name.match(/\.(jpg|jpeg|png)$/i) ? '🖼️' : '📎'}
-                        </span>
+                        <span>{doc.name.endsWith('.pdf') ? '📄' : doc.name.match(/\.(jpg|jpeg|png)$/i) ? '🖼️' : '📎'}</span>
                         <span style={{ color:'#374151' }}>{doc.name.replace(/^\d+_/, '')}</span>
-                        <span style={{ fontSize:'11px', color:'#9ca3af' }}>
-                          {doc.metadata?.size ? `${Math.round(doc.metadata.size / 1024)}KB` : ''}
-                        </span>
+                        <span style={{ fontSize:'11px', color:'#9ca3af' }}>{doc.metadata?.size ? `${Math.round(doc.metadata.size/1024)}KB` : ''}</span>
                       </div>
                       <div style={{ display:'flex', gap:'6px' }}>
                         <button onClick={() => getDocUrl(selected.id, doc.name)}
-                          style={{ padding:'3px 8px', border:'1px solid #e5e7eb', borderRadius:'4px', background:'#fff', fontSize:'11px', cursor:'pointer', color:'#2563eb' }}>
-                          View
-                        </button>
+                          style={{ padding:'3px 8px', border:'1px solid #e5e7eb', borderRadius:'4px', background:'#fff', fontSize:'11px', cursor:'pointer', color:'#9B72F5' }}>View</button>
                         <button onClick={() => handleDocDelete(selected.id, doc.name)}
-                          style={{ padding:'3px 8px', border:'1px solid #fecaca', borderRadius:'4px', background:'#fff', fontSize:'11px', cursor:'pointer', color:'#dc2626' }}>
-                          Delete
-                        </button>
+                          style={{ padding:'3px 8px', border:'1px solid #fecaca', borderRadius:'4px', background:'#fff', fontSize:'11px', cursor:'pointer', color:'#dc2626' }}>Delete</button>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
-              <p style={{ fontSize:'11px', color:'#9ca3af', marginTop:'8px' }}>
-                Accepted: PDF, Word, Excel, Images (max 50MB each)
-              </p>
             </div>
-
             <div style={{ display:'flex', gap:'10px' }}>
               <button onClick={() => { setSelected(null); setSupplierDocs([]) }}
-                style={{ flex:1, padding:'9px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>
-                Close
-              </button>
+                style={{ flex:1, padding:'9px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>Close</button>
               {selected.status === 'pending' && (
                 <button onClick={() => approveSupplier(selected.id)}
                   style={{ flex:1, padding:'9px', border:'none', borderRadius:'8px', background:'#16a34a', color:'#fff', fontSize:'14px', fontWeight:'500', cursor:'pointer' }}>
