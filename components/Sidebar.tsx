@@ -9,7 +9,6 @@ export default function Sidebar() {
   const [activeCompany, setActiveCompany] = useState<any>(null)
   const [userProfile, setUserProfile] = useState<any>(null)
   const [userRole, setUserRole] = useState<string>('')
-  const [isAuth, setIsAuth] = useState(false)
   const pathname = usePathname()
   const supabase = createClient()
 
@@ -19,7 +18,6 @@ export default function Sidebar() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      setIsAuth(true)
       const { data: profile } = await supabase
         .from('user_profiles').select('full_name, email').eq('id', user.id).single()
       setUserProfile(profile)
@@ -29,13 +27,18 @@ export default function Sidebar() {
         .eq('user_id', user.id).eq('is_active', true)
       if (memberships?.length) {
         const cos = memberships.map((m: any) => m.company).filter(Boolean)
-        setCompanies(cos)
+        // Deduplicate companies
+        const uniqueCos = cos.filter((c: any, i: number) => cos.findIndex((x: any) => x.id === c.id) === i)
+        setCompanies(uniqueCos)
         const saved = localStorage.getItem('activeCompanyId')
-        const active = cos.find((c: any) => c.id === saved) || cos[0]
+        const active = uniqueCos.find((c: any) => c.id === saved) || uniqueCos[0]
         setActiveCompany(active)
         if (!saved && active) localStorage.setItem('activeCompanyId', active.id)
-        const activeMembership = memberships.find((m: any) => m.company_id === active?.id)
-        setUserRole((activeMembership as any)?.role?.code || '')
+        // Find role for active company — fall back to first membership
+        const activeMembership = memberships.find((m: any) => m.company_id === active?.id) || memberships[0]
+        const role = (activeMembership as any)?.role?.code || ''
+        console.log('User role detected:', role)
+        setUserRole(role)
       }
     } catch(e) { console.error(e) }
   }
@@ -60,6 +63,8 @@ export default function Sidebar() {
   const isApprover = ['SUPER_ADMIN', 'ADMIN', 'L1_CHECKER', 'L2_CHECKER', 'L3_CHECKER'].includes(userRole)
   const isMaker = userRole === 'MAKER'
   const canSeeFinance = isAdmin || isApprover
+  // Show everything if role not loaded yet
+  const showAll = userRole === ''
 
   return (
     <aside style={{
@@ -101,23 +106,23 @@ export default function Sidebar() {
 
         <SectionLabel label="PROCUREMENT" />
         <NavLink href="/suppliers" label="Suppliers" pathname={pathname} />
-        {(isMaker || isAdmin) && <NavLink href="/requests" label="My Requests" pathname={pathname} />}
-        {isApprover && <NavLink href="/approvals" label="Approvals" pathname={pathname} />}
-        {(isApprover || isMaker || isAdmin) && <NavLink href="/rejections" label="Rejections" pathname={pathname} />}
+        {(showAll || isMaker || isAdmin) && <NavLink href="/requests" label="My Requests" pathname={pathname} />}
+        {(showAll || isApprover) && <NavLink href="/approvals" label="Approvals" pathname={pathname} />}
+        {(showAll || isApprover || isMaker || isAdmin) && <NavLink href="/rejections" label="Rejections" pathname={pathname} />}
 
-        {canSeeFinance && <SectionLabel label="FINANCE" />}
-        {canSeeFinance && <NavLink href="/payments" label="Payments" pathname={pathname} />}
-        {canSeeFinance && <NavLink href="/reports" label="Reports" pathname={pathname} />}
-        {canSeeFinance && <NavLink href="/analytics" label="Analytics" pathname={pathname} />}
+        {(showAll || canSeeFinance) && <SectionLabel label="FINANCE" />}
+        {(showAll || canSeeFinance) && <NavLink href="/payments" label="Payments" pathname={pathname} />}
+        {(showAll || canSeeFinance) && <NavLink href="/reports" label="Reports" pathname={pathname} />}
+        {(showAll || canSeeFinance) && <NavLink href="/analytics" label="Analytics" pathname={pathname} />}
 
         <SectionLabel label="COMPLIANCE" />
         <NavLink href="/audit" label="Audit Trail" pathname={pathname} />
 
-        {isAdmin && <SectionLabel label="ADMIN" />}
-        {isAdmin && <NavLink href="/admin/users" label="Users & Roles" pathname={pathname} />}
-        {isAdmin && <NavLink href="/admin/matrix" label="Approval Matrix" pathname={pathname} />}
-        {isAdmin && <NavLink href="/admin/entities" label="Manage Entities" pathname={pathname} />}
-        {isAdmin && <NavLink href="/admin/departments" label="Manage Departments" pathname={pathname} />}
+        {(showAll || isAdmin) && <SectionLabel label="ADMIN" />}
+        {(showAll || isAdmin) && <NavLink href="/admin/users" label="Users & Roles" pathname={pathname} />}
+        {(showAll || isAdmin) && <NavLink href="/admin/matrix" label="Approval Matrix" pathname={pathname} />}
+        {(showAll || isAdmin) && <NavLink href="/admin/entities" label="Manage Entities" pathname={pathname} />}
+        {(showAll || isAdmin) && <NavLink href="/admin/departments" label="Manage Departments" pathname={pathname} />}
       </nav>
 
       <div style={{ padding:'14px 20px', borderTop:'1px solid rgba(255,255,255,0.08)', background:'rgba(0,0,0,0.1)' }}>
