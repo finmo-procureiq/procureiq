@@ -2,6 +2,17 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/browser'
 
+// Hardcoded — companies table has RLS, can't query from browser
+const COMPANIES = [
+  { id: '33a0603c-5b4e-4418-9683-1a5d544560ea', name: 'Acme India Pvt Ltd', code: 'ACIN' },
+  { id: 'f1d448b1-bc01-4f86-b3fc-6bc0b31c992e', name: 'Acme Singapore Pte Ltd', code: 'ACSG' },
+  { id: '485d369d-087f-4776-a70b-6d1203e29c2d', name: 'Acme UAE LLC', code: 'ACAE' },
+  { id: '8d37db04-7eb7-4b76-afed-df2a50590d7f', name: 'Finmo Tech Pte Ltd', code: 'FTSG' },
+  { id: 'fcf15fb0-29e9-466d-aad2-5b0cf2089a0b', name: 'Finmo Tech India Pvt Ltd', code: 'FTIN' },
+]
+
+const COMPANY_MAP: Record<string, string> = Object.fromEntries(COMPANIES.map(c => [c.id, c.name]))
+
 const ROLE_MAP: Record<string, string> = {
   '3439de3b-d891-4852-9ecb-9c143f4c2516': 'Maker',
   '824f70e7-bdcf-41af-a57f-72f4c2295173': 'Maker',
@@ -26,7 +37,6 @@ const ROLE_OPTIONS = [
 
 export default function UsersPage() {
   const [users, setUsers] = useState<any[]>([])
-  const [companies, setCompanies] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -38,31 +48,18 @@ export default function UsersPage() {
   async function load() {
     setLoading(true)
 
-    const { data: compData } = await supabase
-      .from('companies')
-      .select('id, name, code')
-      .order('name')
-    setCompanies(compData || [])
-
     const { data: members, error } = await supabase
       .from('company_members')
-      .select('id, company_id, user_id, role_id, manages_department, is_active')
+      .select('id, company_id, user_id, role_id, manages_department')
       .eq('is_active', true)
 
-    if (error) {
-      console.error('members error:', error)
-      setLoading(false)
-      return
-    }
-
-    if (!members || members.length === 0) {
+    if (error || !members?.length) {
       setUsers([])
       setLoading(false)
       return
     }
 
     const userIds = [...new Set(members.map((m: any) => m.user_id))]
-    const companyIds = [...new Set(members.map((m: any) => m.company_id))]
 
     const { data: profiles } = await supabase
       .from('user_profiles')
@@ -71,9 +68,6 @@ export default function UsersPage() {
 
     const profileMap: Record<string, any> = {}
     for (const p of profiles || []) profileMap[p.id] = p
-
-    const companyMap: Record<string, any> = {}
-    for (const c of compData || []) companyMap[c.id] = c
 
     const grouped: Record<string, any> = {}
     for (const m of members) {
@@ -89,8 +83,10 @@ export default function UsersPage() {
           companies: [],
         }
       }
-      const c = companyMap[m.company_id]
-      if (c) grouped[uid].companies.push(c.name)
+      const name = COMPANY_MAP[m.company_id]
+      if (name && !grouped[uid].companies.includes(name)) {
+        grouped[uid].companies.push(name)
+      }
     }
 
     setUsers(Object.values(grouped))
@@ -101,7 +97,7 @@ export default function UsersPage() {
     if (!addForm.email || !addForm.role_id) return
     setSaving(true)
     try {
-      const { data: profile, error: profileError } = await supabase
+      const { data: profile } = await supabase
         .from('user_profiles')
         .select('id')
         .eq('email', addForm.email.toLowerCase().trim())
@@ -114,7 +110,7 @@ export default function UsersPage() {
       }
 
       const companyList = addForm.company_id === 'all'
-        ? companies.map((c: any) => c.id)
+        ? COMPANIES.map(c => c.id)
         : [addForm.company_id]
 
       for (const cid of companyList) {
@@ -138,7 +134,7 @@ export default function UsersPage() {
   }
 
   async function deactivate(userId: string, email: string) {
-    if (!confirm(`Deactivate ${email}?`)) return
+    if (!confirm(`Deactivate ${email}? They will lose all access.`)) return
     await supabase.from('company_members').update({ is_active: false }).eq('user_id', userId)
     await load()
   }
@@ -218,8 +214,8 @@ export default function UsersPage() {
               <div>
                 <label style={lbl}>Entity Access</label>
                 <select style={inp} value={addForm.company_id} onChange={e => setAddForm({ ...addForm, company_id: e.target.value })}>
-                  <option value="all">All Entities ({companies.length})</option>
-                  {companies.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  <option value="all">All Entities ({COMPANIES.length})</option>
+                  {COMPANIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
 
