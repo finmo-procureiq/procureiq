@@ -11,8 +11,8 @@ export default function RequestsPage() {
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [user, setUser] = useState<any>(null)
-  const [companyId, setCompanyId] = useState<string | null>(null)
-  const [companyCode, setCompanyCode] = useState<string>('')
+  const [entityId, setEntityId] = useState<string | null>(null)
+  const [entityCode, setEntityCode] = useState<string>('')
   const [currency, setCurrency] = useState<string>('INR')
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
   const [form, setForm] = useState({
@@ -25,72 +25,184 @@ export default function RequestsPage() {
   useEffect(() => { init() }, [])
 
   async function init() {
-    const { data: { user: u } } = await supabase.auth.getUser()
-    if (!u) return
-    setUser(u)
+    try {
+      const { data: { user: u } } = await supabase.auth.getUser()
+      if (!u) return
+      setUser(u)
 
-    const { data: member } = await supabase
-      .from('company_members')
-      .select('company_id, company:companies(id, code, currency)')
-      .eq('user_id', u.id)
-      .eq('is_active', true)
-      .limit(1)
-      .single()
+      // Try entity_members first
+      const { data: member, error: err1 } = await supabase
+        .from('entity_members')
+        .select('entity_id')
+        .eq('user_id', u.id)
+        .eq('is_active', true)
+        .limit(1)
+        .single()
 
-    if (member?.company_id) {
-      setCompanyId(member.company_id)
-      setCompanyCode((member.company as any)?.code || '')
-      setCurrency((member.company as any)?.currency || 'INR')
-      await loadAll(member.company_id)
+      if (!err1 && member?.entity_id) {
+        const eid = member.entity_id
+        setEntityId(eid)
+        // Load entity info for code/currency
+        const { data: entity } = await supabase
+          .from('entities')
+          .select('code, currency')
+          .eq('id', eid)
+          .single()
+        setEntityCode(entity?.code || '')
+        setCurrency(entity?.currency || 'INR')
+        await loadAll(eid)
+        setLoading(false)
+        return
+      }
+
+      // Fallback: company_members with entity_id
+      const { data: member2, error: err2 } = await supabase
+        .from('company_members')
+        .select('entity_id')
+        .eq('user_id', u.id)
+        .eq('is_active', true)
+        .limit(1)
+        .single()
+
+      if (!err2 && member2?.entity_id) {
+        const eid = member2.entity_id
+        setEntityId(eid)
+        const { data: entity } = await supabase
+          .from('entities')
+          .select('code, currency')
+          .eq('id', eid)
+          .single()
+        setEntityCode(entity?.code || '')
+        setCurrency(entity?.currency || 'INR')
+        await loadAll(eid)
+        setLoading(false)
+        return
+      }
+
+      // Fallback: company_members with company_id
+      const { data: member3 } = await supabase
+        .from('company_members')
+        .select('company_id')
+        .eq('user_id', u.id)
+        .eq('is_active', true)
+        .limit(1)
+        .single()
+
+      if (member3?.company_id) {
+        const eid = member3.company_id
+        setEntityId(eid)
+        // Try companies table for code/currency
+        const { data: company } = await supabase
+          .from('companies')
+          .select('code, currency')
+          .eq('id', eid)
+          .single()
+        setEntityCode(company?.code || '')
+        setCurrency(company?.currency || 'INR')
+        await loadAll(eid)
+      }
+    } catch (e) {
+      console.error('init error:', e)
     }
     setLoading(false)
   }
 
-  async function loadAll(cid: string) {
-    const [ordersRes, suppliersRes] = await Promise.all([
-      supabase.from('purchase_orders')
+  async function loadAll(eid: string) {
+    try {
+      // Load purchase orders — try entity_id first, fallback to company_id
+      const { data: ordersData, error: ordErr } = await supabase
+        .from('purchase_orders')
         .select('*, supplier:suppliers(id, name)')
-        .eq('company_id', cid)
-        .order('created_at', { ascending: false }),
-      supabase.from('suppliers')
+        .eq('entity_id', eid)
+        .order('created_at', { ascending: false })
+
+      if (!ordErr) {
+        setOrders(ordersData || [])
+      } else {
+        const { data: ordersData2 } = await supabase
+          .from('purchase_orders')
+          .select('*, supplier:suppliers(id, name)')
+          .eq('company_id', eid)
+          .order('created_at', { ascending: false })
+        setOrders(ordersData2 || [])
+      }
+
+      // Load approved suppliers — try entity_id first
+      const { data: suppData, error: suppErr } = await supabase
+        .from('suppliers')
         .select('id, name')
-        .eq('company_id', cid)
+        .eq('entity_id', eid)
         .eq('status', 'approved')
         .order('name')
-    ])
 
-    setOrders(ordersRes.data || [])
-    setSuppliers(suppliersRes.data || [])
+      if (!suppErr) {
+        setSuppliers(suppData || [])
+      } else {
+        const { data: suppData2 } = await supabase
+          .from('suppliers')
+          .select('id, name')
+          .eq('company_id', eid)
+          .eq('status', 'approved')
+          .order('name')
+        setSuppliers(suppData2 || [])
+      }
+    } catch (e) {
+      console.error('loadAll error:', e)
+    }
   }
 
   async function handleSubmit() {
-    if (!form.title || !form.amount || !form.department || !companyId || !user) return
+    if (!form.title || !form.amount || !form.department || !entityId || !user) return
     setSaving(true)
 
-    const poNumber = `${companyCode}-PO-${Date.now().toString().slice(-6)}`
+    try {
+      const poNumber = `${entityCode || 'PO'}-${Date.now().toString().slice(-6)}`
 
-    const { error } = await supabase.from('purchase_orders').insert({
-      company_id: companyId,
-      po_number: poNumber,
-      title: form.title,
-      description: form.description || null,
-      amount: parseFloat(form.amount),
-      supplier_id: form.supplier_id || null,
-      department: form.department,
-      justification: form.justification || null,
-      invoice_ref: form.invoice_ref || null,
-      requested_by: user.id,
-      status: 'pending_l1',
-      current_level: 1,
-    })
+      // Try inserting with entity_id first
+      const { error } = await supabase.from('purchase_orders').insert({
+        entity_id: entityId,
+        po_number: poNumber,
+        title: form.title,
+        description: form.description || null,
+        amount: parseFloat(form.amount),
+        supplier_id: form.supplier_id || null,
+        department: form.department,
+        justification: form.justification || null,
+        invoice_ref: form.invoice_ref || null,
+        requested_by: user.id,
+        status: 'pending_l1',
+        current_level: 1,
+      })
 
-    if (error) {
-      alert('Error submitting request: ' + error.message)
-    } else {
+      if (error) {
+        // Fallback: try with company_id
+        const { error: error2 } = await supabase.from('purchase_orders').insert({
+          company_id: entityId,
+          po_number: poNumber,
+          title: form.title,
+          description: form.description || null,
+          amount: parseFloat(form.amount),
+          supplier_id: form.supplier_id || null,
+          department: form.department,
+          justification: form.justification || null,
+          invoice_ref: form.invoice_ref || null,
+          requested_by: user.id,
+          status: 'pending_l1',
+          current_level: 1,
+        })
+        if (error2) {
+          alert('Error submitting request: ' + error2.message)
+          setSaving(false)
+          return
+        }
+      }
+
       setShowForm(false)
       setForm({ title:'', description:'', amount:'', supplier_id:'', department:'', justification:'', invoice_ref:'' })
-      await loadAll(companyId)
+      await loadAll(entityId)
       alert('Request submitted successfully!')
+    } catch (e: any) {
+      alert('Error submitting request: ' + e.message)
     }
     setSaving(false)
   }
@@ -169,6 +281,7 @@ export default function RequestsPage() {
         </div>
       )}
 
+      {/* Detail Modal */}
       {selectedOrder && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }}>
           <div style={{ background:'#fff', borderRadius:'16px', width:'520px', maxWidth:'94vw', padding:'28px' }}>
@@ -199,6 +312,14 @@ export default function RequestsPage() {
                 {selectedOrder.description}
               </div>
             )}
+            {selectedOrder.justification && (
+              <div>
+                <div style={{ fontSize:'11px', color:'#9ca3af', marginBottom:'4px' }}>Justification</div>
+                <div style={{ padding:'12px', background:'#fffbeb', border:'1px solid #fde68a', borderRadius:'8px', fontSize:'13px', color:'#92400e' }}>
+                  {selectedOrder.justification}
+                </div>
+              </div>
+            )}
             <div style={{ display:'flex', justifyContent:'flex-end', marginTop:'20px' }}>
               <button onClick={() => setSelectedOrder(null)}
                 style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>
@@ -209,6 +330,7 @@ export default function RequestsPage() {
         </div>
       )}
 
+      {/* New Request Form */}
       {showForm && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }}>
           <div style={{ background:'#fff', borderRadius:'16px', width:'560px', maxWidth:'94vw', padding:'28px', maxHeight:'90vh', overflowY:'auto' }}>
