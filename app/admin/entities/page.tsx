@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/browser'
 
 export default function EntitiesPage() {
-  const [companies, setCompanies] = useState<any[]>([])
+  const [entities, setEntities] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -11,18 +11,16 @@ export default function EntitiesPage() {
 
   const supabase = createClient()
 
-  useEffect(() => { loadCompanies() }, [])
+  useEffect(() => { loadEntities() }, [])
 
-  async function loadCompanies() {
+  async function loadEntities() {
     setLoading(true)
     const { data, error } = await supabase
-      .from('companies')
+      .from('entities')
       .select('*')
       .order('name')
-    if (error) {
-      console.error('Error loading companies:', error)
-    }
-    setCompanies(data || [])
+    if (error) console.error('Error loading entities:', error)
+    setEntities(data || [])
     setLoading(false)
   }
 
@@ -30,7 +28,7 @@ export default function EntitiesPage() {
     if (!form.name || !form.code) return
     setSaving(true)
 
-    const { error } = await supabase.from('companies').insert({
+    const { error } = await supabase.from('entities').insert({
       name: form.name,
       code: form.code.toUpperCase(),
       currency: form.currency,
@@ -42,7 +40,7 @@ export default function EntitiesPage() {
     } else {
       setShowForm(false)
       setForm({ name:'', code:'', currency:'INR', description:'' })
-      await loadCompanies()
+      await loadEntities()
     }
     setSaving(false)
   }
@@ -59,7 +57,7 @@ export default function EntitiesPage() {
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'24px' }}>
         <div>
           <h1 style={{ fontSize:'24px', fontWeight:'600', marginBottom:'4px' }}>Manage Entities</h1>
-          <p style={{ color:'#666', fontSize:'14px', margin:0 }}>{companies.length} entities configured</p>
+          <p style={{ color:'#666', fontSize:'14px', margin:0 }}>{entities.length} entities configured</p>
         </div>
         <button onClick={() => setShowForm(true)}
           style={{ background:'#9B72F5', color:'#fff', border:'none', borderRadius:'8px', padding:'10px 18px', fontSize:'14px', fontWeight:'500', cursor:'pointer' }}>
@@ -67,7 +65,7 @@ export default function EntitiesPage() {
         </button>
       </div>
 
-      {companies.length === 0 ? (
+      {entities.length === 0 ? (
         <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:'12px', padding:'64px', textAlign:'center' }}>
           <div style={{ fontSize:'48px', marginBottom:'16px' }}>🏢</div>
           <h3 style={{ fontSize:'18px', fontWeight:'600', marginBottom:'8px', color:'#374151' }}>No entities yet</h3>
@@ -79,21 +77,21 @@ export default function EntitiesPage() {
         </div>
       ) : (
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(320px, 1fr))', gap:'16px' }}>
-          {companies.map((c, i) => (
-            <div key={c.id} style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:'12px', padding:'24px', position:'relative', overflow:'hidden' }}>
+          {entities.map((e, i) => (
+            <div key={e.id} style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:'12px', padding:'24px', position:'relative', overflow:'hidden' }}>
               <div style={{ position:'absolute', top:0, left:0, right:0, height:'4px', background: colors[i % colors.length] }}/>
               <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:'16px' }}>
                 <div style={{ width:'48px', height:'48px', borderRadius:'12px', background: colors[i % colors.length]+'20',
                   display:'flex', alignItems:'center', justifyContent:'center', fontSize:'20px', fontWeight:'700', color: colors[i % colors.length] }}>
-                  {c.code?.substring(0,2)}
+                  {e.code?.substring(0,2)}
                 </div>
                 <span style={{ padding:'3px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:'600', background:'#f0fdf4', color:'#16a34a' }}>Active</span>
               </div>
-              <h3 style={{ fontSize:'16px', fontWeight:'600', marginBottom:'4px', color:'#111827' }}>{c.name}</h3>
-              <div style={{ fontSize:'13px', color:'#6b7280', marginBottom:'8px' }}>{c.description || 'No description'}</div>
+              <h3 style={{ fontSize:'16px', fontWeight:'600', marginBottom:'4px', color:'#111827' }}>{e.name}</h3>
+              <div style={{ fontSize:'13px', color:'#6b7280', marginBottom:'8px' }}>{e.description || 'No description'}</div>
               <div style={{ display:'flex', gap:'12px', fontSize:'12px', color:'#9ca3af' }}>
-                <span style={{ padding:'3px 8px', borderRadius:'6px', background:'#f3f4f6', color:'#374151', fontWeight:'600', fontFamily:'monospace' }}>{c.code}</span>
-                <span style={{ padding:'3px 8px', borderRadius:'6px', background:'#eff6ff', color:'#1d4ed8', fontWeight:'600' }}>{c.currency}</span>
+                <span style={{ padding:'3px 8px', borderRadius:'6px', background:'#f3f4f6', color:'#374151', fontWeight:'600', fontFamily:'monospace' }}>{e.code}</span>
+                <span style={{ padding:'3px 8px', borderRadius:'6px', background:'#eff6ff', color:'#1d4ed8', fontWeight:'600' }}>{e.currency || 'INR'}</span>
               </div>
             </div>
           ))}
