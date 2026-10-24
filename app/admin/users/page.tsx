@@ -2,240 +2,335 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/browser'
 
+const ROLES = [
+  { code: 'MAKER', label: 'Maker (creates POs)' },
+  { code: 'L1_CHECKER', label: 'L1 Approver' },
+  { code: 'L2_CHECKER', label: 'L2 Approver' },
+  { code: 'L3_CHECKER', label: 'L3 Approver' },
+  { code: 'FINANCE', label: 'Finance' },
+  { code: 'ADMIN', label: 'Admin' },
+]
+
 const DEPARTMENTS = ['IT','Finance','HR','GatewayOps','Compliance','FinOps','RevOps','Customer Success','Legal','Marketing','Sales','Admin']
 
 export default function UsersPage() {
-  const [members, setMembers] = useState<any[]>([])
-  const [companies, setCompanies] = useState<any[]>([])
-  const [roles, setRoles] = useState<any[]>([])
-  const [showForm, setShowForm] = useState(false)
-  const [editingUser, setEditingUser] = useState<any>(null)
-  const [loading, setLoading] = useState(false)
-  const [pageLoading, setPageLoading] = useState(true)
-  const [form, setForm] = useState({ email:'', role_code:'', department:'', entity:'all', manages_department:'' })
-  const [editForm, setEditForm] = useState({ department:'', role_code:'', manages_department:'', add_entity:'' })
+  const [users, setUsers] = useState<any[]>([])
+  const [entities, setEntities] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showAdd, setShowAdd] = useState(false)
+  const [showEdit, setShowEdit] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [editUser, setEditUser] = useState<any>(null)
+
+  const [addForm, setAddForm] = useState({
+    email: '',
+    entity_id: 'all',
+    department: '',
+    role: '',
+    manages_dept: false,
+  })
+
+  const [editForm, setEditForm] = useState({
+    department: '',
+    role: '',
+    manages_dept: false,
+    add_entity_id: '',
+  })
 
   const supabase = createClient()
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => { init() }, [])
 
-  async function loadAll() {
-    setPageLoading(true)
-    try {
-      const { data: cos } = await supabase.from('companies').select('*').order('name')
-      setCompanies(cos || [])
-      const { data: cms } = await supabase.from('company_members').select('*').eq('is_active', true)
-      const { data: profiles } = await supabase.from('user_profiles').select('*')
-      const { data: allRoles } = await supabase.from('roles').select('*')
+  async function init() {
+    setLoading(true)
+    // Load entities
+    const { data: entData } = await supabase
+      .from('entities')
+      .select('id, name, code')
+      .order('name')
+    setEntities(entData || [])
 
-      const userMap: Record<string, any> = {}
-      ;(cms || []).forEach((m: any) => {
-        const profile = (profiles || []).find((p: any) => p.id === m.user_id)
-        const role = (allRoles || []).find((r: any) => r.id === m.role_id)
-        const company = (cos || []).find((c: any) => c.id === m.company_id)
-        if (!profile?.email) return
-        if (!userMap[profile.email]) {
-          userMap[profile.email] = {
-            email: profile.email,
-            full_name: profile.full_name,
-            role_code: role?.code || '',
-            role_name: role?.name || '',
-            department: profile.department || '',
-            manages_department: '',
+    // Load users via company_members joined with user_profiles
+    const { data: members } = await supabase
+      .from('company_members')
+      .select('*, profile:user_profiles(id, email, full_name), entity:entities(id, name, code)')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+
+    if (members) {
+      // Group by user email
+      const grouped: Record<string, any> = {}
+      for (const m of members) {
+        const email = m.profile?.email || m.user_id
+        if (!grouped[email]) {
+          grouped[email] = {
+            user_id: m.user_id,
+            email,
+            full_name: m.profile?.full_name || email,
+            department: m.department || '',
+            role: m.role || '',
+            manages_dept: m.manages_dept || false,
             entities: [],
-            entity_ids: [],
+            member_ids: [],
           }
         }
-        if (company?.code && !userMap[profile.email].entities.includes(company.code)) {
-          userMap[profile.email].entities.push(company.code)
-          userMap[profile.email].entity_ids.push(company.id)
-        }
-        if (m.manages_department) {
-          userMap[profile.email].manages_department = m.manages_department
-        }
-      })
-      setMembers(Object.values(userMap))
-
-      if (cos?.length) {
-        const { data: roleList } = await supabase.from('roles').select('id, name, code').eq('company_id', cos[0].id).order('name')
-        setRoles(roleList || [])
+        grouped[email].entities.push(m.entity?.name || m.entity_id || m.company_id)
+        grouped[email].member_ids.push(m.id)
       }
-    } catch(e) { console.error(e) }
-    setPageLoading(false)
-  }
-
-  async function handleAddUser() {
-    if (!form.email || !form.role_code) return
-    setLoading(true)
-    const { data: profile } = await supabase.from('user_profiles').select('id').eq('email', form.email.toLowerCase().trim()).single()
-    if (!profile) {
-      alert('User not found. Ask them to log in at https://procureiq-gdja.onrender.com/auth/login first.')
-      setLoading(false)
-      return
-    }
-    if (form.department) {
-      await supabase.from('user_profiles').update({ department: form.department }).eq('id', profile.id)
-    }
-    const targetCompanies = form.entity === 'all' ? companies : companies.filter(c => c.id === form.entity)
-    let successCount = 0
-    for (const company of targetCompanies) {
-      const { data: role } = await supabase.from('roles').select('id').eq('company_id', company.id).eq('code', form.role_code).single()
-      if (!role) continue
-      const { error } = await supabase.from('company_members').upsert({
-        company_id: company.id, user_id: profile.id, role_id: role.id,
-        is_active: true, manages_department: form.manages_department || null,
-      }, { onConflict: 'company_id,user_id' })
-      if (!error) successCount++
+      setUsers(Object.values(grouped))
     }
     setLoading(false)
-    setShowForm(false)
-    setForm({ email:'', role_code:'', department:'', entity:'all', manages_department:'' })
-    await loadAll()
-    alert(`User added to ${successCount} ${successCount === 1 ? 'entity' : 'entities'} successfully!`)
   }
 
-  async function handleEditSave() {
-    if (!editingUser) return
-    setLoading(true)
-    const { data: profile } = await supabase.from('user_profiles').select('id').eq('email', editingUser.email).single()
-    if (profile) {
-      await supabase.from('user_profiles').update({ department: editForm.department }).eq('id', profile.id)
-      for (const company of companies) {
-        const updates: any = { manages_department: editForm.manages_department || null }
-        if (editForm.role_code && editForm.role_code !== editingUser.role_code) {
-          const { data: role } = await supabase.from('roles').select('id').eq('company_id', company.id).eq('code', editForm.role_code).single()
-          if (role) updates.role_id = role.id
-        }
-        await supabase.from('company_members').update(updates).eq('company_id', company.id).eq('user_id', profile.id)
+  async function handleAdd() {
+    if (!addForm.email || !addForm.role) return
+    setSaving(true)
+
+    try {
+      // Find the user profile by email
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('id')
+        .eq('email', addForm.email.toLowerCase().trim())
+        .single()
+
+      if (!profile) {
+        alert('User not found. They must log in with Google first at procureiq-gdja.onrender.com')
+        setSaving(false)
+        return
       }
-      // Add to new entity if selected
-      if (editForm.add_entity) {
-        const { data: role } = await supabase.from('roles').select('id').eq('company_id', editForm.add_entity).eq('code', editForm.role_code || editingUser.role_code).single()
-        if (role) {
-          await supabase.from('company_members').upsert({
-            company_id: editForm.add_entity, user_id: profile.id,
-            role_id: role.id, is_active: true,
-            manages_department: editForm.manages_department || null,
-          }, { onConflict: 'company_id,user_id' })
-        }
+
+      const entityList = addForm.entity_id === 'all'
+        ? entities.map(e => e.id)
+        : [addForm.entity_id]
+
+      for (const eid of entityList) {
+        await supabase.from('company_members').upsert({
+          user_id: profile.id,
+          entity_id: eid,
+          role: addForm.role,
+          department: addForm.department || null,
+          manages_dept: addForm.manages_dept,
+          is_active: true,
+        }, { onConflict: 'user_id,entity_id' })
       }
+
+      setShowAdd(false)
+      setAddForm({ email:'', entity_id:'all', department:'', role:'', manages_dept:false })
+      await init()
+      alert('User added successfully!')
+    } catch (e: any) {
+      alert('Error adding user: ' + e.message)
     }
-    setLoading(false)
-    setEditingUser(null)
-    await loadAll()
+    setSaving(false)
   }
 
-  async function deactivateUser(email: string) {
-    if (!confirm(`Deactivate ${email} from all entities?`)) return
-    const { data: profile } = await supabase.from('user_profiles').select('id').eq('email', email).single()
-    if (!profile) return
-    await supabase.from('company_members').update({ is_active: false }).eq('user_id', profile.id)
-    await loadAll()
+  async function handleEdit() {
+    if (!editUser) return
+    setSaving(true)
+
+    try {
+      // Update all existing memberships for this user
+      await supabase.from('company_members')
+        .update({
+          role: editForm.role,
+          department: editForm.department || null,
+          manages_dept: editForm.manages_dept,
+        })
+        .eq('user_id', editUser.user_id)
+        .eq('is_active', true)
+
+      // Add new entity access if selected
+      if (editForm.add_entity_id) {
+        await supabase.from('company_members').upsert({
+          user_id: editUser.user_id,
+          entity_id: editForm.add_entity_id,
+          role: editForm.role,
+          department: editForm.department || null,
+          manages_dept: editForm.manages_dept,
+          is_active: true,
+        }, { onConflict: 'user_id,entity_id' })
+      }
+
+      setShowEdit(false)
+      setEditUser(null)
+      await init()
+    } catch (e: any) {
+      alert('Error updating user: ' + e.message)
+    }
+    setSaving(false)
   }
 
-  const isApprover = (code: string) => ['L1_CHECKER','L2_CHECKER','L3_CHECKER','SUPER_ADMIN','ADMIN'].includes(code)
-
-  const roleColors: Record<string,string> = {
-    SUPER_ADMIN:'#7c3aed', ADMIN:'#2563eb', L1_CHECKER:'#f59e0b',
-    L2_CHECKER:'#ea580c', L3_CHECKER:'#dc2626', MAKER:'#16a34a', VIEWER:'#6b7280'
+  async function handleDeactivate(userId: string, email: string) {
+    if (!confirm(`Deactivate ${email}? They will lose access to all entities.`)) return
+    await supabase.from('company_members')
+      .update({ is_active: false })
+      .eq('user_id', userId)
+    await init()
   }
+
+  function openEdit(u: any) {
+    setEditUser(u)
+    setEditForm({
+      department: u.department || '',
+      role: u.role || '',
+      manages_dept: u.manages_dept || false,
+      add_entity_id: '',
+    })
+    setShowEdit(true)
+  }
+
   const inp: React.CSSProperties = { width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:'8px', fontFamily:'sans-serif', fontSize:'13px', outline:'none', boxSizing:'border-box' }
   const lbl: React.CSSProperties = { display:'block', fontSize:'12px', fontWeight:'500', color:'#6b7280', marginBottom:'4px' }
-  const selectedEntityName = form.entity === 'all' ? `all ${companies.length} entities` : companies.find(c => c.id === form.entity)?.code || ''
+
+  const roleLabel = (code: string) => ROLES.find(r => r.code === code)?.label || code
+
+  if (loading) return <div style={{ padding:'48px', textAlign:'center', color:'#9ca3af', fontFamily:'sans-serif' }}>Loading users...</div>
 
   return (
     <div style={{ fontFamily:'sans-serif', padding:'32px', maxWidth:'1100px', margin:'0 auto' }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'24px' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'16px' }}>
         <div>
           <h1 style={{ fontSize:'24px', fontWeight:'600', marginBottom:'4px' }}>Users & Roles</h1>
-          <p style={{ color:'#666', fontSize:'14px', margin:0 }}>Manage team members across all {companies.length} entities</p>
+          <p style={{ color:'#666', fontSize:'14px', margin:0 }}>Manage team members and their approval roles</p>
         </div>
-        <button onClick={() => setShowForm(true)}
+        <button onClick={() => setShowAdd(true)}
           style={{ background:'#9B72F5', color:'#fff', border:'none', borderRadius:'8px', padding:'10px 18px', fontSize:'14px', fontWeight:'500', cursor:'pointer' }}>
           + Add User
         </button>
       </div>
 
-      <div style={{ padding:'14px 18px', background:'#f5f3ff', border:'1px solid #ddd6fe', borderRadius:'10px', marginBottom:'20px', fontSize:'13px', color:'#5b21b6' }}>
-        <strong>Approval routing:</strong> POs route to the approver whose <strong>Manages Dept</strong> matches the maker's department. Set this on each approver via Edit.
+      <div style={{ padding:'12px 16px', background:'#f5f3ff', border:'1px solid #ddd6fe', borderRadius:'8px', fontSize:'13px', color:'#5b21b6', marginBottom:'20px' }}>
+        <strong>Approval routing:</strong> POs route to the approver whose "Manages Dept" matches the maker's department. Set this on each approver via Edit.
       </div>
 
-      <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:'12px', overflow:'hidden' }}>
+      <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:'12px', overflow:'hidden', marginBottom:'24px' }}>
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'14px' }}>
           <thead style={{ background:'#f9fafb' }}>
             <tr>
-              {['User','Email','Department','Role','Manages Dept','Entities','Actions'].map(h => (
+              {['User','Role','Dept','Entities','Actions'].map(h => (
                 <th key={h} style={{ padding:'12px 16px', textAlign:'left', fontSize:'12px', fontWeight:'600', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.4px', borderBottom:'1px solid #e5e7eb' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {pageLoading ? (
-              <tr><td colSpan={7} style={{ padding:'48px', textAlign:'center', color:'#9ca3af' }}>Loading users...</td></tr>
-            ) : members.length === 0 ? (
-              <tr><td colSpan={7} style={{ padding:'48px', textAlign:'center', color:'#9ca3af' }}>No users found.</td></tr>
-            ) : members.map(m => (
-              <tr key={m.email} style={{ borderBottom:'1px solid #f3f4f6' }}>
-                <td style={{ padding:'12px 16px', fontWeight:'500' }}>{m.full_name || '—'}</td>
-                <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{m.email}</td>
-                <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{m.department || '—'}</td>
+            {users.map(u => (
+              <tr key={u.user_id} style={{ borderBottom:'1px solid #f3f4f6' }}>
                 <td style={{ padding:'12px 16px' }}>
-                  <span style={{ padding:'4px 10px', borderRadius:'6px', fontSize:'12px', fontWeight:'600',
-                    background:(roleColors[m.role_code]||'#6b7280')+'15', color:roleColors[m.role_code]||'#6b7280' }}>
-                    {m.role_name}
+                  <div style={{ fontWeight:'500', color:'#111827' }}>{u.full_name}</div>
+                  <div style={{ fontSize:'12px', color:'#9ca3af' }}>{u.email}</div>
+                </td>
+                <td style={{ padding:'12px 16px' }}>
+                  <span style={{ padding:'3px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:'600', background:'#f5f3ff', color:'#7c3aed' }}>
+                    {roleLabel(u.role)}
                   </span>
+                  {u.manages_dept && <div style={{ fontSize:'11px', color:'#059669', marginTop:'4px' }}>✓ Manages dept</div>}
                 </td>
+                <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{u.department || '—'}</td>
+                <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{u.entities.join(', ') || '—'}</td>
                 <td style={{ padding:'12px 16px' }}>
-                  {isApprover(m.role_code) ? (
-                    m.manages_department
-                      ? <span style={{ fontSize:'12px', padding:'3px 8px', borderRadius:'20px', background:'#f0fdf4', color:'#16a34a', fontWeight:'500' }}>{m.manages_department}</span>
-                      : <span style={{ fontSize:'12px', color:'#f59e0b', fontStyle:'italic' }}>Not set</span>
-                  ) : <span style={{ color:'#d1d5db' }}>—</span>}
-                </td>
-                <td style={{ padding:'12px 16px' }}>
-                  <div style={{ display:'flex', gap:'4px', flexWrap:'wrap' }}>
-                    {companies.map(c => (
-                      <span key={c.id} style={{ fontSize:'10px', padding:'2px 6px', borderRadius:'4px', fontWeight:'600',
-                        background: m.entities.includes(c.code) ? '#ede9fe' : '#f3f4f6',
-                        color: m.entities.includes(c.code) ? '#7c3aed' : '#d1d5db' }}>
-                        {c.code}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td style={{ padding:'12px 16px' }}>
-                  <div style={{ display:'flex', gap:'6px' }}>
-                    <button onClick={() => { setEditingUser(m); setEditForm({ department: m.department, role_code: m.role_code, manages_department: m.manages_department || '', add_entity:'' }) }}
-                      style={{ fontSize:'12px', padding:'4px 10px', border:'1px solid #9B72F5', borderRadius:'6px', background:'#f5f3ff', color:'#7c3aed', cursor:'pointer' }}>
+                  <div style={{ display:'flex', gap:'8px' }}>
+                    <button onClick={() => openEdit(u)}
+                      style={{ fontSize:'12px', padding:'4px 12px', border:'1px solid #ddd6fe', borderRadius:'6px', background:'#fff', color:'#7c3aed', cursor:'pointer' }}>
                       Edit
                     </button>
-                    <button onClick={() => deactivateUser(m.email)}
-                      style={{ fontSize:'12px', padding:'4px 10px', border:'1px solid #fecaca', borderRadius:'6px', background:'#fff', color:'#dc2626', cursor:'pointer' }}>
+                    <button onClick={() => handleDeactivate(u.user_id, u.email)}
+                      style={{ fontSize:'12px', padding:'4px 12px', border:'1px solid #fecaca', borderRadius:'6px', background:'#fff', color:'#dc2626', cursor:'pointer' }}>
                       Deactivate
                     </button>
                   </div>
                 </td>
               </tr>
             ))}
+            {users.length === 0 && (
+              <tr><td colSpan={5} style={{ padding:'32px', textAlign:'center', color:'#9ca3af' }}>No users yet. Click + Add User.</td></tr>
+            )}
           </tbody>
         </table>
       </div>
 
-      <div style={{ marginTop:'16px', padding:'12px 16px', background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:'8px', fontSize:'13px', color:'#1d4ed8' }}>
-        <strong>How to add a new user:</strong> Ask them to log in at <strong>https://procureiq-gdja.onrender.com/auth/login</strong> first, then click + Add User.
+      <div style={{ padding:'14px 16px', background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:'8px', fontSize:'13px', color:'#6b7280' }}>
+        <strong style={{ color:'#374151' }}>How to add a new user:</strong> They must first log in at this URL with their @finmo.net Google account. Then click + Add User.
       </div>
 
-      {/* Edit User Modal */}
-      {editingUser && (
+      {/* Add User Modal */}
+      {showAdd && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }}>
-          <div style={{ background:'#fff', borderRadius:'16px', width:'480px', maxWidth:'94vw', maxHeight:'90vh', overflowY:'auto', padding:'28px' }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px' }}>
-              <div>
-                <h2 style={{ fontSize:'18px', fontWeight:'600', marginBottom:'2px' }}>Edit User</h2>
-                <p style={{ fontSize:'12px', color:'#6b7280', margin:0 }}>{editingUser.full_name} — {editingUser.email}</p>
-              </div>
-              <button onClick={() => setEditingUser(null)} style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#6b7280' }}>X</button>
+          <div style={{ background:'#fff', borderRadius:'16px', width:'500px', maxWidth:'94vw', padding:'28px' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
+              <h2 style={{ fontSize:'18px', fontWeight:'600', margin:0 }}>Add New User</h2>
+              <button onClick={() => setShowAdd(false)} style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#6b7280' }}>X</button>
             </div>
+            <p style={{ fontSize:'13px', color:'#9ca3af', marginBottom:'20px', marginTop:0 }}>Select entity access, department and role</p>
+
+            <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
+              <div>
+                <label style={lbl}>Email Address *</label>
+                <input style={inp} type="email" value={addForm.email}
+                  onChange={e => setAddForm({...addForm, email:e.target.value})}
+                  placeholder="name@finmo.net"/>
+                <p style={{ fontSize:'11px', color:'#9ca3af', marginTop:'4px' }}>User must have logged in with Google first</p>
+              </div>
+
+              <div>
+                <label style={lbl}>Entity Access</label>
+                <select style={inp} value={addForm.entity_id} onChange={e => setAddForm({...addForm, entity_id:e.target.value})}>
+                  <option value="all">All Entities ({entities.length})</option>
+                  {entities.map(e => <option key={e.id} value={e.id}>{e.name} ({e.code})</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label style={lbl}>Department</label>
+                <select style={inp} value={addForm.department} onChange={e => setAddForm({...addForm, department:e.target.value})}>
+                  <option value="">Select department...</option>
+                  {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label style={lbl}>Role *</label>
+                <select style={inp} value={addForm.role} onChange={e => setAddForm({...addForm, role:e.target.value})}>
+                  <option value="">Select role...</option>
+                  {ROLES.map(r => <option key={r.code} value={r.code}>{r.label}</option>)}
+                </select>
+              </div>
+
+              <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                <input type="checkbox" id="manages_dept_add" checked={addForm.manages_dept}
+                  onChange={e => setAddForm({...addForm, manages_dept:e.target.checked})}
+                  style={{ width:'16px', height:'16px', cursor:'pointer' }}/>
+                <label htmlFor="manages_dept_add" style={{ fontSize:'13px', color:'#374151', cursor:'pointer' }}>
+                  Manages Department (approver receives POs from their dept)
+                </label>
+              </div>
+            </div>
+
+            <div style={{ display:'flex', gap:'10px', marginTop:'24px', justifyContent:'flex-end' }}>
+              <button onClick={() => setShowAdd(false)}
+                style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>
+                Cancel
+              </button>
+              <button onClick={handleAdd} disabled={saving || !addForm.email || !addForm.role}
+                style={{ padding:'9px 18px', border:'none', borderRadius:'8px', fontSize:'14px', fontWeight:'500', cursor:'pointer', color:'#fff',
+                  background: (!addForm.email||!addForm.role) ? '#c4b5fd' : '#9B72F5' }}>
+                {saving ? 'Adding...' : `Add to ${addForm.entity_id === 'all' ? `all ${entities.length}` : '1'} ${addForm.entity_id === 'all' && entities.length !== 1 ? 'entities' : 'entity'}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit User Modal */}
+      {showEdit && editUser && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }}>
+          <div style={{ background:'#fff', borderRadius:'16px', width:'500px', maxWidth:'94vw', padding:'28px' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
+              <h2 style={{ fontSize:'18px', fontWeight:'600', margin:0 }}>Edit User</h2>
+              <button onClick={() => setShowEdit(false)} style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#6b7280' }}>X</button>
+            </div>
+            <p style={{ fontSize:'13px', color:'#9ca3af', marginBottom:'20px', marginTop:0 }}>{editUser.email}</p>
+
             <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
               <div>
                 <label style={lbl}>Department</label>
@@ -244,109 +339,41 @@ export default function UsersPage() {
                   {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
+
               <div>
-                <label style={lbl}>Role</label>
-                <select style={inp} value={editForm.role_code} onChange={e => setEditForm({...editForm, role_code:e.target.value})}>
-                  {roles.map(r => <option key={r.code} value={r.code}>{r.name}</option>)}
+                <label style={lbl}>Role *</label>
+                <select style={inp} value={editForm.role} onChange={e => setEditForm({...editForm, role:e.target.value})}>
+                  <option value="">Select role...</option>
+                  {ROLES.map(r => <option key={r.code} value={r.code}>{r.label}</option>)}
                 </select>
               </div>
-              {isApprover(editForm.role_code) && (
-                <div style={{ background:'#fffbeb', border:'1px solid #fde68a', borderRadius:'8px', padding:'12px' }}>
-                  <label style={{ ...lbl, color:'#92400e' }}>Manages Department</label>
-                  <select style={inp} value={editForm.manages_department} onChange={e => setEditForm({...editForm, manages_department:e.target.value})}>
-                    <option value="">All departments</option>
-                    {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
-                  <p style={{ fontSize:'11px', color:'#92400e', marginTop:'6px' }}>POs from this department will route to this approver.</p>
-                </div>
-              )}
-              <div style={{ borderTop:'1px solid #f3f4f6', paddingTop:'14px' }}>
-                <label style={lbl}>Add Access to Entity</label>
-                <select style={inp} value={editForm.add_entity} onChange={e => setEditForm({...editForm, add_entity:e.target.value})}>
-                  <option value="">Select entity to add...</option>
-                  {companies.filter(c => !editingUser.entities.includes(c.code)).map(c => (
-                    <option key={c.id} value={c.id}>{c.code} — {c.name}</option>
-                  ))}
+
+              <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                <input type="checkbox" id="manages_dept_edit" checked={editForm.manages_dept}
+                  onChange={e => setEditForm({...editForm, manages_dept:e.target.checked})}
+                  style={{ width:'16px', height:'16px', cursor:'pointer' }}/>
+                <label htmlFor="manages_dept_edit" style={{ fontSize:'13px', color:'#374151', cursor:'pointer' }}>
+                  Manages Department
+                </label>
+              </div>
+
+              <div>
+                <label style={lbl}>Add Access to Entity (optional)</label>
+                <select style={inp} value={editForm.add_entity_id} onChange={e => setEditForm({...editForm, add_entity_id:e.target.value})}>
+                  <option value="">No additional entity</option>
+                  {entities.map(e => <option key={e.id} value={e.id}>{e.name} ({e.code})</option>)}
                 </select>
-                <div style={{ marginTop:'6px', display:'flex', gap:'4px', flexWrap:'wrap' }}>
-                  {companies.map(c => (
-                    <span key={c.id} style={{ fontSize:'11px', padding:'2px 8px', borderRadius:'20px', fontWeight:'600',
-                      background: editingUser.entities.includes(c.code) ? '#ede9fe' : '#f3f4f6',
-                      color: editingUser.entities.includes(c.code) ? '#7c3aed' : '#9ca3af' }}>
-                      {c.code} {editingUser.entities.includes(c.code) ? '✓' : ''}
-                    </span>
-                  ))}
-                </div>
               </div>
             </div>
+
             <div style={{ display:'flex', gap:'10px', marginTop:'24px', justifyContent:'flex-end' }}>
-              <button onClick={() => setEditingUser(null)}
+              <button onClick={() => setShowEdit(false)}
                 style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>
                 Cancel
               </button>
-              <button onClick={handleEditSave} disabled={loading}
-                style={{ padding:'9px 18px', border:'none', borderRadius:'8px', background:'#9B72F5', color:'#fff', fontSize:'14px', fontWeight:'500', cursor:'pointer' }}>
-                {loading ? 'Saving...' : 'Save Changes'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add User Modal */}
-      {showForm && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }}>
-          <div style={{ background:'#fff', borderRadius:'16px', width:'480px', maxWidth:'94vw', maxHeight:'90vh', overflowY:'auto', padding:'28px' }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px' }}>
-              <div>
-                <h2 style={{ fontSize:'18px', fontWeight:'600', marginBottom:'2px' }}>Add New User</h2>
-                <p style={{ fontSize:'12px', color:'#6b7280', margin:0 }}>Select entity access, department and role</p>
-              </div>
-              <button onClick={() => setShowForm(false)} style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#6b7280' }}>X</button>
-            </div>
-            <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
-              <div>
-                <label style={lbl}>Email Address *</label>
-                <input style={inp} type="email" value={form.email} onChange={e => setForm({...form, email:e.target.value})} placeholder="name@finmo.net"/>
-                <p style={{ fontSize:'11px', color:'#9ca3af', marginTop:'4px' }}>User must have logged in with Google first</p>
-              </div>
-              <div>
-                <label style={lbl}>Entity Access</label>
-                <select style={inp} value={form.entity} onChange={e => setForm({...form, entity:e.target.value})}>
-                  <option value="all">All Entities ({companies.length})</option>
-                  {companies.map(c => <option key={c.id} value={c.id}>{c.code} — {c.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={lbl}>Department</label>
-                <select style={inp} value={form.department} onChange={e => setForm({...form, department:e.target.value})}>
-                  <option value="">Select department...</option>
-                  {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={lbl}>Role *</label>
-                <select style={inp} value={form.role_code} onChange={e => setForm({...form, role_code:e.target.value})}>
-                  <option value="">Select role...</option>
-                  {roles.map(r => <option key={r.code} value={r.code}>{r.name}</option>)}
-                </select>
-              </div>
-              {isApprover(form.role_code) && (
-                <div style={{ background:'#fffbeb', border:'1px solid #fde68a', borderRadius:'8px', padding:'12px' }}>
-                  <label style={{ ...lbl, color:'#92400e' }}>Manages Department</label>
-                  <select style={inp} value={form.manages_department} onChange={e => setForm({...form, manages_department:e.target.value})}>
-                    <option value="">All departments</option>
-                    {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
-                  <p style={{ fontSize:'11px', color:'#92400e', marginTop:'6px' }}>POs from this department will route to this approver.</p>
-                </div>
-              )}
-            </div>
-            <div style={{ display:'flex', gap:'10px', marginTop:'24px', justifyContent:'flex-end' }}>
-              <button onClick={() => setShowForm(false)} style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>Cancel</button>
-              <button onClick={handleAddUser} disabled={loading || !form.email || !form.role_code}
-                style={{ padding:'9px 18px', border:'none', borderRadius:'8px', fontSize:'14px', fontWeight:'500', cursor:'pointer', color:'#fff', background: !form.email||!form.role_code ? '#c4b5fd' : '#9B72F5' }}>
-                {loading ? 'Adding...' : `Add to ${selectedEntityName}`}
+              <button onClick={handleEdit} disabled={saving}
+                style={{ padding:'9px 18px', border:'none', borderRadius:'8px', fontSize:'14px', fontWeight:'500', cursor:'pointer', color:'#fff', background:'#9B72F5' }}>
+                {saving ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </div>
