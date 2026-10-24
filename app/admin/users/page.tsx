@@ -2,20 +2,41 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/browser'
 
-const ROLES = [
-  { code: 'MAKER', label: 'Maker (creates POs)' },
-  { code: 'L1_CHECKER', label: 'L1 Approver' },
-  { code: 'L2_CHECKER', label: 'L2 Approver' },
-  { code: 'L3_CHECKER', label: 'L3 Approver' },
-  { code: 'FINANCE', label: 'Finance' },
-  { code: 'ADMIN', label: 'Admin' },
+// Known role UUIDs from the database
+const ROLE_OPTIONS = [
+  { id: '3439de3b-d891-4852-9ecb-9c143f4c2516', label: 'MAKER' },
+  { id: '824f70e7-bdcf-41af-a57f-72f4c2295173', label: 'MAKER' },
+  { id: '299f57cd-13c7-49d7-b4c3-3d6111ba78f6', label: 'MAKER' },
+  { id: '878b9e57-6825-43ad-ab6a-9ed1301f88c1', label: 'MAKER' },
+  { id: 'f7c2af7d-a798-4cca-bf93-97b6ec1ab367', label: 'MAKER' },
+  { id: '36689185-99ec-4d70-8037-5797884e5e78', label: 'L1 CHECKER' },
+  { id: '097c907d-6e1c-433f-ab45-16d9be64a1ad', label: 'L2 CHECKER' },
+  { id: 'ca9a3015-bd1a-44df-aaa1-bf822f6261a5', label: 'L3 CHECKER' },
+  { id: '0fafb943-5a6e-468f-a6da-0fded964c173', label: 'FINANCE' },
+  { id: 'd4ca2a99-039e-4976-b7d1-a42ef2894477', label: 'ADMIN' },
+]
+
+// Simple roles for new users — we'll use the first UUID for each role type
+// These are placeholder UUIDs; admin can update role via edit
+const NEW_USER_ROLES = [
+  { id: '3439de3b-d891-4852-9ecb-9c143f4c2516', label: 'Maker (creates POs)' },
+  { id: '36689185-99ec-4d70-8037-5797884e5e78', label: 'L1 Approver' },
+  { id: '097c907d-6e1c-433f-ab45-16d9be64a1ad', label: 'L2 Approver' },
+  { id: 'ca9a3015-bd1a-44df-aaa1-bf822f6261a5', label: 'L3 Approver' },
+  { id: '0fafb943-5a6e-468f-a6da-0fded964c173', label: 'Finance' },
+  { id: 'd4ca2a99-039e-4976-b7d1-a42ef2894477', label: 'Admin' },
 ]
 
 const DEPARTMENTS = ['IT','Finance','HR','GatewayOps','Compliance','FinOps','RevOps','Customer Success','Legal','Marketing','Sales','Admin']
 
+function getRoleLabel(roleId: string) {
+  const match = ROLE_OPTIONS.find(r => r.id === roleId)
+  return match?.label || roleId?.substring(0, 8) + '...'
+}
+
 export default function UsersPage() {
   const [users, setUsers] = useState<any[]>([])
-  const [entities, setEntities] = useState<any[]>([])
+  const [companies, setCompanies] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
@@ -24,17 +45,17 @@ export default function UsersPage() {
 
   const [addForm, setAddForm] = useState({
     email: '',
-    entity_id: 'all',
+    company_id: 'all',
     department: '',
-    role: '',
-    manages_dept: false,
+    role_id: '',
+    manages_department: false,
   })
 
   const [editForm, setEditForm] = useState({
     department: '',
-    role: '',
-    manages_dept: false,
-    add_entity_id: '',
+    role_id: '',
+    manages_department: false,
+    add_company_id: '',
   })
 
   const supabase = createClient()
@@ -43,39 +64,40 @@ export default function UsersPage() {
 
   async function init() {
     setLoading(true)
-    // Load entities
-    const { data: entData } = await supabase
-      .from('entities')
+
+    // Load companies
+    const { data: compData } = await supabase
+      .from('companies')
       .select('id, name, code')
       .order('name')
-    setEntities(entData || [])
+    setCompanies(compData || [])
 
-    // Load users via company_members joined with user_profiles
+    // Load company_members with user profiles
     const { data: members } = await supabase
       .from('company_members')
-      .select('*, profile:user_profiles(id, email, full_name), entity:entities(id, name, code)')
+      .select('id, company_id, user_id, role_id, manages_department, is_active, company:companies(id, name, code), profile:user_profiles(id, email, full_name)')
       .eq('is_active', true)
       .order('created_at', { ascending: false })
 
     if (members) {
-      // Group by user email
+      // Group by user_id
       const grouped: Record<string, any> = {}
       for (const m of members) {
-        const email = m.profile?.email || m.user_id
-        if (!grouped[email]) {
-          grouped[email] = {
-            user_id: m.user_id,
-            email,
-            full_name: m.profile?.full_name || email,
+        const uid = m.user_id
+        if (!grouped[uid]) {
+          grouped[uid] = {
+            user_id: uid,
+            email: m.profile?.email || uid,
+            full_name: m.profile?.full_name || m.profile?.email || uid,
+            role_id: m.role_id,
             department: m.department || '',
-            role: m.role || '',
-            manages_dept: m.manages_dept || false,
-            entities: [],
+            manages_department: m.manages_department || false,
+            companies: [],
             member_ids: [],
           }
         }
-        grouped[email].entities.push(m.entity?.name || m.entity_id || m.company_id)
-        grouped[email].member_ids.push(m.id)
+        if (m.company?.name) grouped[uid].companies.push(m.company.name)
+        grouped[uid].member_ids.push(m.id)
       }
       setUsers(Object.values(grouped))
     }
@@ -83,11 +105,11 @@ export default function UsersPage() {
   }
 
   async function handleAdd() {
-    if (!addForm.email || !addForm.role) return
+    if (!addForm.email || !addForm.role_id) return
     setSaving(true)
 
     try {
-      // Find the user profile by email
+      // Find user profile by email
       const { data: profile } = await supabase
         .from('user_profiles')
         .select('id')
@@ -95,30 +117,31 @@ export default function UsersPage() {
         .single()
 
       if (!profile) {
-        alert('User not found. They must log in with Google first at procureiq-gdja.onrender.com')
+        alert('User not found. They must log in with Google SSO first at:\nhttps://procureiq-gdja.onrender.com')
         setSaving(false)
         return
       }
 
-      const entityList = addForm.entity_id === 'all'
-        ? entities.map(e => e.id)
-        : [addForm.entity_id]
+      const companyList = addForm.company_id === 'all'
+        ? companies.map(c => c.id)
+        : [addForm.company_id]
 
-      for (const eid of entityList) {
-        await supabase.from('company_members').upsert({
+      let successCount = 0
+      for (const cid of companyList) {
+        const { error } = await supabase.from('company_members').upsert({
           user_id: profile.id,
-          entity_id: eid,
-          role: addForm.role,
-          department: addForm.department || null,
-          manages_dept: addForm.manages_dept,
+          company_id: cid,
+          role_id: addForm.role_id,
+          manages_department: addForm.manages_department,
           is_active: true,
-        }, { onConflict: 'user_id,entity_id' })
+        }, { onConflict: 'user_id,company_id' })
+        if (!error) successCount++
       }
 
       setShowAdd(false)
-      setAddForm({ email:'', entity_id:'all', department:'', role:'', manages_dept:false })
+      setAddForm({ email:'', company_id:'all', department:'', role_id:'', manages_department:false })
       await init()
-      alert('User added successfully!')
+      alert(`User added to ${successCount} ${successCount === 1 ? 'entity' : 'entities'} successfully!`)
     } catch (e: any) {
       alert('Error adding user: ' + e.message)
     }
@@ -130,26 +153,22 @@ export default function UsersPage() {
     setSaving(true)
 
     try {
-      // Update all existing memberships for this user
+      const updates: any = { role_id: editForm.role_id, manages_department: editForm.manages_department }
+
       await supabase.from('company_members')
-        .update({
-          role: editForm.role,
-          department: editForm.department || null,
-          manages_dept: editForm.manages_dept,
-        })
+        .update(updates)
         .eq('user_id', editUser.user_id)
         .eq('is_active', true)
 
-      // Add new entity access if selected
-      if (editForm.add_entity_id) {
+      // Add to new company if selected
+      if (editForm.add_company_id) {
         await supabase.from('company_members').upsert({
           user_id: editUser.user_id,
-          entity_id: editForm.add_entity_id,
-          role: editForm.role,
-          department: editForm.department || null,
-          manages_dept: editForm.manages_dept,
+          company_id: editForm.add_company_id,
+          role_id: editForm.role_id,
+          manages_department: editForm.manages_department,
           is_active: true,
-        }, { onConflict: 'user_id,entity_id' })
+        }, { onConflict: 'user_id,company_id' })
       }
 
       setShowEdit(false)
@@ -162,7 +181,7 @@ export default function UsersPage() {
   }
 
   async function handleDeactivate(userId: string, email: string) {
-    if (!confirm(`Deactivate ${email}? They will lose access to all entities.`)) return
+    if (!confirm(`Deactivate ${email}? They will lose all access.`)) return
     await supabase.from('company_members')
       .update({ is_active: false })
       .eq('user_id', userId)
@@ -173,17 +192,15 @@ export default function UsersPage() {
     setEditUser(u)
     setEditForm({
       department: u.department || '',
-      role: u.role || '',
-      manages_dept: u.manages_dept || false,
-      add_entity_id: '',
+      role_id: u.role_id || '',
+      manages_department: u.manages_department || false,
+      add_company_id: '',
     })
     setShowEdit(true)
   }
 
   const inp: React.CSSProperties = { width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:'8px', fontFamily:'sans-serif', fontSize:'13px', outline:'none', boxSizing:'border-box' }
   const lbl: React.CSSProperties = { display:'block', fontSize:'12px', fontWeight:'500', color:'#6b7280', marginBottom:'4px' }
-
-  const roleLabel = (code: string) => ROLES.find(r => r.code === code)?.label || code
 
   if (loading) return <div style={{ padding:'48px', textAlign:'center', color:'#9ca3af', fontFamily:'sans-serif' }}>Loading users...</div>
 
@@ -208,7 +225,7 @@ export default function UsersPage() {
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'14px' }}>
           <thead style={{ background:'#f9fafb' }}>
             <tr>
-              {['User','Role','Dept','Entities','Actions'].map(h => (
+              {['User','Role','Entities','Actions'].map(h => (
                 <th key={h} style={{ padding:'12px 16px', textAlign:'left', fontSize:'12px', fontWeight:'600', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.4px', borderBottom:'1px solid #e5e7eb' }}>{h}</th>
               ))}
             </tr>
@@ -222,12 +239,11 @@ export default function UsersPage() {
                 </td>
                 <td style={{ padding:'12px 16px' }}>
                   <span style={{ padding:'3px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:'600', background:'#f5f3ff', color:'#7c3aed' }}>
-                    {roleLabel(u.role)}
+                    {getRoleLabel(u.role_id)}
                   </span>
-                  {u.manages_dept && <div style={{ fontSize:'11px', color:'#059669', marginTop:'4px' }}>✓ Manages dept</div>}
+                  {u.manages_department && <div style={{ fontSize:'11px', color:'#059669', marginTop:'4px' }}>✓ Manages dept</div>}
                 </td>
-                <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{u.department || '—'}</td>
-                <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{u.entities.join(', ') || '—'}</td>
+                <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{u.companies.join(', ') || '—'}</td>
                 <td style={{ padding:'12px 16px' }}>
                   <div style={{ display:'flex', gap:'8px' }}>
                     <button onClick={() => openEdit(u)}
@@ -243,7 +259,7 @@ export default function UsersPage() {
               </tr>
             ))}
             {users.length === 0 && (
-              <tr><td colSpan={5} style={{ padding:'32px', textAlign:'center', color:'#9ca3af' }}>No users yet. Click + Add User.</td></tr>
+              <tr><td colSpan={4} style={{ padding:'32px', textAlign:'center', color:'#9ca3af' }}>No users yet. Click + Add User.</td></tr>
             )}
           </tbody>
         </table>
@@ -261,7 +277,7 @@ export default function UsersPage() {
               <h2 style={{ fontSize:'18px', fontWeight:'600', margin:0 }}>Add New User</h2>
               <button onClick={() => setShowAdd(false)} style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#6b7280' }}>X</button>
             </div>
-            <p style={{ fontSize:'13px', color:'#9ca3af', marginBottom:'20px', marginTop:0 }}>Select entity access, department and role</p>
+            <p style={{ fontSize:'13px', color:'#9ca3af', marginBottom:'20px', marginTop:0 }}>Select entity access and role</p>
 
             <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
               <div>
@@ -274,9 +290,9 @@ export default function UsersPage() {
 
               <div>
                 <label style={lbl}>Entity Access</label>
-                <select style={inp} value={addForm.entity_id} onChange={e => setAddForm({...addForm, entity_id:e.target.value})}>
-                  <option value="all">All Entities ({entities.length})</option>
-                  {entities.map(e => <option key={e.id} value={e.id}>{e.name} ({e.code})</option>)}
+                <select style={inp} value={addForm.company_id} onChange={e => setAddForm({...addForm, company_id:e.target.value})}>
+                  <option value="all">All Entities ({companies.length})</option>
+                  {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
 
@@ -290,15 +306,15 @@ export default function UsersPage() {
 
               <div>
                 <label style={lbl}>Role *</label>
-                <select style={inp} value={addForm.role} onChange={e => setAddForm({...addForm, role:e.target.value})}>
+                <select style={inp} value={addForm.role_id} onChange={e => setAddForm({...addForm, role_id:e.target.value})}>
                   <option value="">Select role...</option>
-                  {ROLES.map(r => <option key={r.code} value={r.code}>{r.label}</option>)}
+                  {NEW_USER_ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
                 </select>
               </div>
 
               <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-                <input type="checkbox" id="manages_dept_add" checked={addForm.manages_dept}
-                  onChange={e => setAddForm({...addForm, manages_dept:e.target.checked})}
+                <input type="checkbox" id="manages_dept_add" checked={addForm.manages_department}
+                  onChange={e => setAddForm({...addForm, manages_department:e.target.checked})}
                   style={{ width:'16px', height:'16px', cursor:'pointer' }}/>
                 <label htmlFor="manages_dept_add" style={{ fontSize:'13px', color:'#374151', cursor:'pointer' }}>
                   Manages Department (approver receives POs from their dept)
@@ -311,10 +327,10 @@ export default function UsersPage() {
                 style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>
                 Cancel
               </button>
-              <button onClick={handleAdd} disabled={saving || !addForm.email || !addForm.role}
+              <button onClick={handleAdd} disabled={saving || !addForm.email || !addForm.role_id}
                 style={{ padding:'9px 18px', border:'none', borderRadius:'8px', fontSize:'14px', fontWeight:'500', cursor:'pointer', color:'#fff',
-                  background: (!addForm.email||!addForm.role) ? '#c4b5fd' : '#9B72F5' }}>
-                {saving ? 'Adding...' : `Add to ${addForm.entity_id === 'all' ? `all ${entities.length}` : '1'} ${addForm.entity_id === 'all' && entities.length !== 1 ? 'entities' : 'entity'}`}
+                  background: (!addForm.email||!addForm.role_id) ? '#c4b5fd' : '#9B72F5' }}>
+                {saving ? 'Adding...' : `Add to ${addForm.company_id === 'all' ? `all ${companies.length}` : '1'} ${addForm.company_id === 'all' && companies.length !== 1 ? 'entities' : 'entity'}`}
               </button>
             </div>
           </div>
@@ -342,15 +358,15 @@ export default function UsersPage() {
 
               <div>
                 <label style={lbl}>Role *</label>
-                <select style={inp} value={editForm.role} onChange={e => setEditForm({...editForm, role:e.target.value})}>
+                <select style={inp} value={editForm.role_id} onChange={e => setEditForm({...editForm, role_id:e.target.value})}>
                   <option value="">Select role...</option>
-                  {ROLES.map(r => <option key={r.code} value={r.code}>{r.label}</option>)}
+                  {NEW_USER_ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
                 </select>
               </div>
 
               <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-                <input type="checkbox" id="manages_dept_edit" checked={editForm.manages_dept}
-                  onChange={e => setEditForm({...editForm, manages_dept:e.target.checked})}
+                <input type="checkbox" id="manages_dept_edit" checked={editForm.manages_department}
+                  onChange={e => setEditForm({...editForm, manages_department:e.target.checked})}
                   style={{ width:'16px', height:'16px', cursor:'pointer' }}/>
                 <label htmlFor="manages_dept_edit" style={{ fontSize:'13px', color:'#374151', cursor:'pointer' }}>
                   Manages Department
@@ -359,9 +375,9 @@ export default function UsersPage() {
 
               <div>
                 <label style={lbl}>Add Access to Entity (optional)</label>
-                <select style={inp} value={editForm.add_entity_id} onChange={e => setEditForm({...editForm, add_entity_id:e.target.value})}>
+                <select style={inp} value={editForm.add_company_id} onChange={e => setEditForm({...editForm, add_company_id:e.target.value})}>
                   <option value="">No additional entity</option>
-                  {entities.map(e => <option key={e.id} value={e.id}>{e.name} ({e.code})</option>)}
+                  {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
             </div>
