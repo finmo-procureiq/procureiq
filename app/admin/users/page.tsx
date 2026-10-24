@@ -2,15 +2,13 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/browser'
 
-// Hardcoded — companies table has RLS, can't query from browser
 const COMPANIES = [
-  { id: '33a0603c-5b4e-4418-9683-1a5d544560ea', name: 'Acme India Pvt Ltd', code: 'ACIN' },
-  { id: 'f1d448b1-bc01-4f86-b3fc-6bc0b31c992e', name: 'Acme Singapore Pte Ltd', code: 'ACSG' },
-  { id: '485d369d-087f-4776-a70b-6d1203e29c2d', name: 'Acme UAE LLC', code: 'ACAE' },
-  { id: '8d37db04-7eb7-4b76-afed-df2a50590d7f', name: 'Finmo Tech Pte Ltd', code: 'FTSG' },
-  { id: 'fcf15fb0-29e9-466d-aad2-5b0cf2089a0b', name: 'Finmo Tech India Pvt Ltd', code: 'FTIN' },
+  { id: '33a0603c-5b4e-4418-9683-1a5d544560ea', name: 'Acme India Pvt Ltd' },
+  { id: 'f1d448b1-bc01-4f86-b3fc-6bc0b31c992e', name: 'Acme Singapore Pte Ltd' },
+  { id: '485d369d-087f-4776-a70b-6d1203e29c2d', name: 'Acme UAE LLC' },
+  { id: '8d37db04-7eb7-4b76-afed-df2a50590d7f', name: 'Finmo Tech Pte Ltd' },
+  { id: 'fcf15fb0-29e9-466d-aad2-5b0cf2089a0b', name: 'Finmo Tech India Pvt Ltd' },
 ]
-
 const COMPANY_MAP: Record<string, string> = Object.fromEntries(COMPANIES.map(c => [c.id, c.name]))
 
 const ROLE_MAP: Record<string, string> = {
@@ -41,28 +39,25 @@ export default function UsersPage() {
   const [users, setUsers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
+  const [showEdit, setShowEdit] = useState(false)
+  const [editUser, setEditUser] = useState<any>(null)
   const [saving, setSaving] = useState(false)
   const [addForm, setAddForm] = useState({ email: '', company_id: 'all', role_id: '', department: '', manages_department: false })
+  const [editForm, setEditForm] = useState({ role_id: '', department: '', manages_department: false })
   const supabase = createClient()
 
   useEffect(() => { load() }, [])
 
   async function load() {
     setLoading(true)
-
     const { data: members, error } = await supabase
       .from('company_members')
-      .select('id, company_id, user_id, role_id, manages_department, is_active')
+      .select('id, company_id, user_id, role_id, manages_department')
       .eq('is_active', true)
 
-    if (error || !members?.length) {
-      setUsers([])
-      setLoading(false)
-      return
-    }
+    if (error || !members?.length) { setUsers([]); setLoading(false); return }
 
     const userIds = [...new Set(members.map((m: any) => m.user_id))]
-
     const { data: profiles } = await supabase
       .from('user_profiles')
       .select('id, email, full_name, department, designation')
@@ -88,11 +83,8 @@ export default function UsersPage() {
         }
       }
       const name = COMPANY_MAP[m.company_id]
-      if (name && !grouped[uid].companies.includes(name)) {
-        grouped[uid].companies.push(name)
-      }
+      if (name && !grouped[uid].companies.includes(name)) grouped[uid].companies.push(name)
     }
-
     setUsers(Object.values(grouped))
     setLoading(false)
   }
@@ -102,50 +94,53 @@ export default function UsersPage() {
     setSaving(true)
     try {
       const { data: profile } = await supabase
-        .from('user_profiles')
-        .select('id')
-        .eq('email', addForm.email.toLowerCase().trim())
-        .single()
-
+        .from('user_profiles').select('id').eq('email', addForm.email.toLowerCase().trim()).single()
       if (!profile) {
         alert('User not found. They must log in at https://procureiq-gdja.onrender.com first.')
-        setSaving(false)
-        return
+        setSaving(false); return
       }
-
-      // Update department/designation on user_profiles if provided
       if (addForm.department) {
-        await supabase.from('user_profiles')
-          .update({ department: addForm.department })
-          .eq('id', profile.id)
+        await supabase.from('user_profiles').update({ department: addForm.department }).eq('id', profile.id)
       }
-
-      const companyList = addForm.company_id === 'all'
-        ? COMPANIES.map(c => c.id)
-        : [addForm.company_id]
-
+      const companyList = addForm.company_id === 'all' ? COMPANIES.map(c => c.id) : [addForm.company_id]
       for (const cid of companyList) {
         await supabase.from('company_members').upsert({
-          user_id: profile.id,
-          company_id: cid,
-          role_id: addForm.role_id,
-          manages_department: addForm.manages_department,
-          is_active: true,
+          user_id: profile.id, company_id: cid, role_id: addForm.role_id,
+          manages_department: addForm.manages_department, is_active: true,
         }, { onConflict: 'user_id,company_id' })
       }
-
       setShowAdd(false)
       setAddForm({ email: '', company_id: 'all', role_id: '', department: '', manages_department: false })
       await load()
       alert('User added successfully!')
-    } catch (e: any) {
-      alert('Error: ' + e.message)
-    }
+    } catch (e: any) { alert('Error: ' + e.message) }
     setSaving(false)
   }
 
+  async function handleEdit() {
+    if (!editUser || !editForm.role_id) return
+    setSaving(true)
+    try {
+      await supabase.from('company_members')
+        .update({ role_id: editForm.role_id, manages_department: editForm.manages_department })
+        .eq('user_id', editUser.user_id).eq('is_active', true)
+      if (editForm.department) {
+        await supabase.from('user_profiles').update({ department: editForm.department }).eq('id', editUser.user_id)
+      }
+      setShowEdit(false); setEditUser(null)
+      await load()
+    } catch (e: any) { alert('Error: ' + e.message) }
+    setSaving(false)
+  }
+
+  function openEdit(u: any) {
+    setEditUser(u)
+    setEditForm({ role_id: u.role_id, department: u.department, manages_department: u.manages_department })
+    setShowEdit(true)
+  }
+
   async function deactivate(userId: string, email: string) {
-    if (!confirm(`Deactivate ${email}? They will lose all access.`)) return
+    if (!confirm(`Deactivate ${email}?`)) return
     await supabase.from('company_members').update({ is_active: false }).eq('user_id', userId)
     await load()
   }
@@ -183,7 +178,6 @@ export default function UsersPage() {
                 <td style={{ padding: '12px 16px' }}>
                   <div style={{ fontWeight: 500 }}>{u.full_name}</div>
                   <div style={{ fontSize: 12, color: '#9ca3af' }}>{u.email}</div>
-                  {u.designation && <div style={{ fontSize: 11, color: '#9ca3af' }}>{u.designation}</div>}
                 </td>
                 <td style={{ padding: '12px 16px', color: '#6b7280', fontSize: 13 }}>
                   {u.department || <span style={{ color: '#d1d5db' }}>—</span>}
@@ -196,10 +190,16 @@ export default function UsersPage() {
                 </td>
                 <td style={{ padding: '12px 16px', color: '#6b7280', fontSize: 13 }}>{u.companies.join(', ') || '—'}</td>
                 <td style={{ padding: '12px 16px' }}>
-                  <button onClick={() => deactivate(u.user_id, u.email)}
-                    style={{ fontSize: 12, padding: '4px 12px', border: '1px solid #fecaca', borderRadius: 6, background: '#fff', color: '#dc2626', cursor: 'pointer' }}>
-                    Deactivate
-                  </button>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => openEdit(u)}
+                      style={{ fontSize: 12, padding: '4px 12px', border: '1px solid #ddd6fe', borderRadius: 6, background: '#fff', color: '#7c3aed', cursor: 'pointer' }}>
+                      Edit
+                    </button>
+                    <button onClick={() => deactivate(u.user_id, u.email)}
+                      style={{ fontSize: 12, padding: '4px 12px', border: '1px solid #fecaca', borderRadius: 6, background: '#fff', color: '#dc2626', cursor: 'pointer' }}>
+                      Deactivate
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -210,6 +210,7 @@ export default function UsersPage() {
         </table>
       </div>
 
+      {/* Add User Modal */}
       {showAdd && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999 }}>
           <div style={{ background: '#fff', borderRadius: 16, width: 480, maxWidth: '94vw', padding: 28 }}>
@@ -217,16 +218,13 @@ export default function UsersPage() {
               <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Add New User</h2>
               <button onClick={() => setShowAdd(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#6b7280' }}>✕</button>
             </div>
-
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
                 <label style={lbl}>Email Address *</label>
                 <input style={inp} type="email" value={addForm.email}
-                  onChange={e => setAddForm({ ...addForm, email: e.target.value })}
-                  placeholder="name@finmo.net" />
+                  onChange={e => setAddForm({ ...addForm, email: e.target.value })} placeholder="name@finmo.net" />
                 <p style={{ fontSize: 11, color: '#9ca3af', margin: '4px 0 0' }}>User must have logged in with Google SSO first</p>
               </div>
-
               <div>
                 <label style={lbl}>Entity Access</label>
                 <select style={inp} value={addForm.company_id} onChange={e => setAddForm({ ...addForm, company_id: e.target.value })}>
@@ -234,7 +232,6 @@ export default function UsersPage() {
                   {COMPANIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
-
               <div>
                 <label style={lbl}>Department</label>
                 <select style={inp} value={addForm.department} onChange={e => setAddForm({ ...addForm, department: e.target.value })}>
@@ -242,7 +239,6 @@ export default function UsersPage() {
                   {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
-
               <div>
                 <label style={lbl}>Role *</label>
                 <select style={inp} value={addForm.role_id} onChange={e => setAddForm({ ...addForm, role_id: e.target.value })}>
@@ -250,26 +246,63 @@ export default function UsersPage() {
                   {ROLE_OPTIONS.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
                 </select>
               </div>
-
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input type="checkbox" id="mgmt" checked={addForm.manages_department}
+                <input type="checkbox" id="mgmt_add" checked={addForm.manages_department}
                   onChange={e => setAddForm({ ...addForm, manages_department: e.target.checked })}
                   style={{ width: 16, height: 16, cursor: 'pointer' }} />
-                <label htmlFor="mgmt" style={{ fontSize: 13, cursor: 'pointer' }}>
-                  Manages Department (approver receives POs from their dept)
-                </label>
+                <label htmlFor="mgmt_add" style={{ fontSize: 13, cursor: 'pointer' }}>Manages Department</label>
               </div>
             </div>
-
             <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
               <button onClick={() => setShowAdd(false)}
-                style={{ padding: '9px 18px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', fontSize: 14, cursor: 'pointer' }}>
-                Cancel
-              </button>
+                style={{ padding: '9px 18px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', fontSize: 14, cursor: 'pointer' }}>Cancel</button>
               <button onClick={handleAdd} disabled={saving || !addForm.email || !addForm.role_id}
                 style={{ padding: '9px 18px', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 500, cursor: 'pointer', color: '#fff',
                   background: (!addForm.email || !addForm.role_id) ? '#c4b5fd' : '#9B72F5' }}>
                 {saving ? 'Adding...' : 'Add User'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit User Modal */}
+      {showEdit && editUser && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999 }}>
+          <div style={{ background: '#fff', borderRadius: 16, width: 480, maxWidth: '94vw', padding: 28 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Edit User</h2>
+              <button onClick={() => setShowEdit(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#6b7280' }}>✕</button>
+            </div>
+            <p style={{ fontSize: 13, color: '#9ca3af', margin: '0 0 20px' }}>{editUser.full_name} · {editUser.email}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={lbl}>Department</label>
+                <select style={inp} value={editForm.department} onChange={e => setEditForm({ ...editForm, department: e.target.value })}>
+                  <option value="">Select department...</option>
+                  {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={lbl}>Role *</label>
+                <select style={inp} value={editForm.role_id} onChange={e => setEditForm({ ...editForm, role_id: e.target.value })}>
+                  <option value="">Select role...</option>
+                  {ROLE_OPTIONS.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+                </select>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" id="mgmt_edit" checked={editForm.manages_department}
+                  onChange={e => setEditForm({ ...editForm, manages_department: e.target.checked })}
+                  style={{ width: 16, height: 16, cursor: 'pointer' }} />
+                <label htmlFor="mgmt_edit" style={{ fontSize: 13, cursor: 'pointer' }}>Manages Department</label>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowEdit(false)}
+                style={{ padding: '9px 18px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', fontSize: 14, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={handleEdit} disabled={saving || !editForm.role_id}
+                style={{ padding: '9px 18px', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 500, cursor: 'pointer', color: '#fff', background: '#9B72F5' }}>
+                {saving ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </div>
