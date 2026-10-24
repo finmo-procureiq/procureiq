@@ -35,12 +35,14 @@ const ROLE_OPTIONS = [
   { id: 'd4ca2a99-039e-4976-b7d1-a42ef2894477', label: 'Admin' },
 ]
 
+const DEPARTMENTS = ['IT','Finance','HR','GatewayOps','Compliance','FinOps','RevOps','Customer Success','Legal','Marketing','Sales','Admin']
+
 export default function UsersPage() {
   const [users, setUsers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [addForm, setAddForm] = useState({ email: '', company_id: 'all', role_id: '', manages_department: false })
+  const [addForm, setAddForm] = useState({ email: '', company_id: 'all', role_id: '', department: '', manages_department: false })
   const supabase = createClient()
 
   useEffect(() => { load() }, [])
@@ -50,7 +52,7 @@ export default function UsersPage() {
 
     const { data: members, error } = await supabase
       .from('company_members')
-      .select('id, company_id, user_id, role_id, manages_department')
+      .select('id, company_id, user_id, role_id, manages_department, is_active')
       .eq('is_active', true)
 
     if (error || !members?.length) {
@@ -63,7 +65,7 @@ export default function UsersPage() {
 
     const { data: profiles } = await supabase
       .from('user_profiles')
-      .select('id, email, full_name')
+      .select('id, email, full_name, department, designation')
       .in('id', userIds)
 
     const profileMap: Record<string, any> = {}
@@ -78,6 +80,8 @@ export default function UsersPage() {
           user_id: uid,
           email: p.email || uid,
           full_name: p.full_name || p.email || uid,
+          department: p.department || '',
+          designation: p.designation || '',
           role_id: m.role_id,
           manages_department: m.manages_department || false,
           companies: [],
@@ -109,6 +113,13 @@ export default function UsersPage() {
         return
       }
 
+      // Update department/designation on user_profiles if provided
+      if (addForm.department) {
+        await supabase.from('user_profiles')
+          .update({ department: addForm.department })
+          .eq('id', profile.id)
+      }
+
       const companyList = addForm.company_id === 'all'
         ? COMPANIES.map(c => c.id)
         : [addForm.company_id]
@@ -124,7 +135,7 @@ export default function UsersPage() {
       }
 
       setShowAdd(false)
-      setAddForm({ email: '', company_id: 'all', role_id: '', manages_department: false })
+      setAddForm({ email: '', company_id: 'all', role_id: '', department: '', manages_department: false })
       await load()
       alert('User added successfully!')
     } catch (e: any) {
@@ -145,7 +156,7 @@ export default function UsersPage() {
   if (loading) return <div style={{ padding: 48, textAlign: 'center', color: '#9ca3af', fontFamily: 'sans-serif' }}>Loading users...</div>
 
   return (
-    <div style={{ fontFamily: 'sans-serif', padding: 32, maxWidth: 1100, margin: '0 auto' }}>
+    <div style={{ fontFamily: 'sans-serif', padding: 32, maxWidth: 1200, margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 600, margin: 0 }}>Users & Roles</h1>
@@ -161,7 +172,7 @@ export default function UsersPage() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
           <thead style={{ background: '#f9fafb' }}>
             <tr>
-              {['User', 'Role', 'Entities', 'Actions'].map(h => (
+              {['User', 'Department', 'Role', 'Entities', 'Actions'].map(h => (
                 <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', borderBottom: '1px solid #e5e7eb' }}>{h}</th>
               ))}
             </tr>
@@ -172,11 +183,16 @@ export default function UsersPage() {
                 <td style={{ padding: '12px 16px' }}>
                   <div style={{ fontWeight: 500 }}>{u.full_name}</div>
                   <div style={{ fontSize: 12, color: '#9ca3af' }}>{u.email}</div>
+                  {u.designation && <div style={{ fontSize: 11, color: '#9ca3af' }}>{u.designation}</div>}
+                </td>
+                <td style={{ padding: '12px 16px', color: '#6b7280', fontSize: 13 }}>
+                  {u.department || <span style={{ color: '#d1d5db' }}>—</span>}
                 </td>
                 <td style={{ padding: '12px 16px' }}>
                   <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: '#f5f3ff', color: '#7c3aed' }}>
                     {ROLE_MAP[u.role_id] || 'Unknown'}
                   </span>
+                  {u.manages_department && <div style={{ fontSize: 11, color: '#059669', marginTop: 3 }}>✓ Dept manager</div>}
                 </td>
                 <td style={{ padding: '12px 16px', color: '#6b7280', fontSize: 13 }}>{u.companies.join(', ') || '—'}</td>
                 <td style={{ padding: '12px 16px' }}>
@@ -188,7 +204,7 @@ export default function UsersPage() {
               </tr>
             ))}
             {users.length === 0 && (
-              <tr><td colSpan={4} style={{ padding: 32, textAlign: 'center', color: '#9ca3af' }}>No users found.</td></tr>
+              <tr><td colSpan={5} style={{ padding: 32, textAlign: 'center', color: '#9ca3af' }}>No users found.</td></tr>
             )}
           </tbody>
         </table>
@@ -216,6 +232,14 @@ export default function UsersPage() {
                 <select style={inp} value={addForm.company_id} onChange={e => setAddForm({ ...addForm, company_id: e.target.value })}>
                   <option value="all">All Entities ({COMPANIES.length})</option>
                   {COMPANIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label style={lbl}>Department</label>
+                <select style={inp} value={addForm.department} onChange={e => setAddForm({ ...addForm, department: e.target.value })}>
+                  <option value="">Select department...</option>
+                  {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
 
