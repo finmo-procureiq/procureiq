@@ -7,7 +7,7 @@ export default function SuppliersPage() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [companyId, setCompanyId] = useState<string | null>(null)
+  const [entityId, setEntityId] = useState<string | null>(null)
   const [form, setForm] = useState({
     name: '', contact_email: '', contact_phone: '', gstin: '',
     bank_name: '', bank_account: '', bank_ifsc: '', address: '',
@@ -19,65 +19,146 @@ export default function SuppliersPage() {
   useEffect(() => { init() }, [])
 
   async function init() {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
 
-    const { data: member } = await supabase
-      .from('company_members')
-      .select('company_id')
-      .eq('user_id', user.id)
-      .eq('is_active', true)
-      .limit(1)
-      .single()
+      // Try entity_members first (uses entity_id)
+      const { data: member, error: memberError } = await supabase
+        .from('entity_members')
+        .select('entity_id')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .limit(1)
+        .single()
 
-    if (member?.company_id) {
-      setCompanyId(member.company_id)
-      await loadSuppliers(member.company_id)
+      if (!memberError && member?.entity_id) {
+        setEntityId(member.entity_id)
+        await loadSuppliers(member.entity_id)
+        setLoading(false)
+        return
+      }
+
+      // Fallback: try company_members with entity_id column
+      const { data: member2, error: memberError2 } = await supabase
+        .from('company_members')
+        .select('entity_id')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .limit(1)
+        .single()
+
+      if (!memberError2 && member2?.entity_id) {
+        setEntityId(member2.entity_id)
+        await loadSuppliers(member2.entity_id)
+        setLoading(false)
+        return
+      }
+
+      // Fallback: try company_members with company_id column
+      const { data: member3 } = await supabase
+        .from('company_members')
+        .select('company_id')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .limit(1)
+        .single()
+
+      if (member3?.company_id) {
+        setEntityId(member3.company_id)
+        await loadSuppliers(member3.company_id)
+      }
+    } catch (e) {
+      console.error('init error:', e)
     }
     setLoading(false)
   }
 
-  async function loadSuppliers(cid: string) {
-    const { data } = await supabase
-      .from('suppliers')
-      .select('*')
-      .eq('company_id', cid)
-      .order('created_at', { ascending: false })
-    setSuppliers(data || [])
+  async function loadSuppliers(eid: string) {
+    try {
+      // Try entity_id column first
+      const { data, error } = await supabase
+        .from('suppliers')
+        .select('id, name, contact_email, contact_phone, gstin, bank_name, bank_account, bank_ifsc, address, payment_terms, category, status, created_at')
+        .eq('entity_id', eid)
+        .order('created_at', { ascending: false })
+
+      if (!error) {
+        setSuppliers(data || [])
+        return
+      }
+
+      // Fallback: try company_id column
+      const { data: data2 } = await supabase
+        .from('suppliers')
+        .select('id, name, contact_email, contact_phone, gstin, bank_name, bank_account, bank_ifsc, address, payment_terms, category, status, created_at')
+        .eq('company_id', eid)
+        .order('created_at', { ascending: false })
+
+      setSuppliers(data2 || [])
+    } catch (e) {
+      console.error('loadSuppliers error:', e)
+      setSuppliers([])
+    }
   }
 
   async function handleSave() {
-    if (!form.name || !companyId) return
+    if (!form.name || !entityId) return
     setSaving(true)
 
-    const { error } = await supabase.from('suppliers').insert({
-      company_id: companyId,
-      name: form.name,
-      contact_email: form.contact_email || null,
-      contact_phone: form.contact_phone || null,
-      gstin: form.gstin || null,
-      bank_name: form.bank_name || null,
-      bank_account: form.bank_account || null,
-      bank_ifsc: form.bank_ifsc || null,
-      address: form.address || null,
-      payment_terms: parseInt(form.payment_terms) || 30,
-      category: form.category || null,
-      status: form.status,
-    })
+    try {
+      // Try inserting with entity_id first
+      const { error } = await supabase.from('suppliers').insert({
+        entity_id: entityId,
+        name: form.name,
+        contact_email: form.contact_email || null,
+        contact_phone: form.contact_phone || null,
+        gstin: form.gstin || null,
+        bank_name: form.bank_name || null,
+        bank_account: form.bank_account || null,
+        bank_ifsc: form.bank_ifsc || null,
+        address: form.address || null,
+        payment_terms: parseInt(form.payment_terms) || 30,
+        category: form.category || null,
+        status: form.status,
+      })
 
-    if (error) {
-      alert('Error saving supplier: ' + error.message)
-    } else {
+      if (error) {
+        // Fallback: try with company_id
+        const { error: error2 } = await supabase.from('suppliers').insert({
+          company_id: entityId,
+          name: form.name,
+          contact_email: form.contact_email || null,
+          contact_phone: form.contact_phone || null,
+          gstin: form.gstin || null,
+          bank_name: form.bank_name || null,
+          bank_account: form.bank_account || null,
+          bank_ifsc: form.bank_ifsc || null,
+          address: form.address || null,
+          payment_terms: parseInt(form.payment_terms) || 30,
+          category: form.category || null,
+          status: form.status,
+        })
+
+        if (error2) {
+          alert('Error saving supplier: ' + error2.message)
+          setSaving(false)
+          return
+        }
+      }
+
       setShowForm(false)
       setForm({ name:'', contact_email:'', contact_phone:'', gstin:'', bank_name:'', bank_account:'', bank_ifsc:'', address:'', payment_terms:'30', category:'', status:'pending' })
-      await loadSuppliers(companyId)
+      await loadSuppliers(entityId)
+    } catch (e: any) {
+      alert('Error saving supplier: ' + e.message)
     }
     setSaving(false)
   }
 
   async function updateStatus(id: string, status: string) {
     await supabase.from('suppliers').update({ status }).eq('id', id)
-    if (companyId) await loadSuppliers(companyId)
+    if (entityId) await loadSuppliers(entityId)
   }
 
   const statusColor: Record<string,string> = {
