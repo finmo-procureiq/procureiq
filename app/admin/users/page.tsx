@@ -70,7 +70,6 @@ export default function UsersPage() {
       const uid = m.user_id
       if (!grouped[uid]) {
         const p = profileMap[uid] || {}
-        // Resolve roles: prefer new roles[] array, fallback to role_id mapping
         let roles: string[] = m.roles?.filter(Boolean) || []
         if (!roles.length && m.role_id) {
           const legacyMap: Record<string, string> = {
@@ -92,7 +91,7 @@ export default function UsersPage() {
           email: p.email || uid,
           full_name: p.full_name || p.email || uid,
           department: m.department || p.department || '',
-          manages_department: m.manages_department || true,
+          manages_department: m.manages_department === true,
           roles,
           companies: [],
           member_rows: [],
@@ -121,11 +120,7 @@ export default function UsersPage() {
         alert('User not found. They must log in at https://procureiq-gdja.onrender.com first.')
         setSaving(false); return
       }
-      if (addForm.department) {
-        await supabase.from('user_profiles').update({ department: addForm.department }).eq('id', profile.id)
-      }
       const companyList = addForm.company_id === 'all' ? COMPANIES.map(c => c.id) : [addForm.company_id]
-      // Use first role as role_id for backwards compat
       const primaryRoleId: Record<string, string> = {
         MAKER: '3439de3b-d891-4852-9ecb-9c143f4c2516',
         L1: '36689185-99ec-4d70-8037-5797884e5e78',
@@ -140,7 +135,7 @@ export default function UsersPage() {
           role_id: primaryRoleId[addForm.roles[0]],
           roles: addForm.roles,
           department: addForm.department || null,
-          manages_department: addForm.manages_department,
+          manages_department: addForm.manages_department === true,
           is_active: true,
         }, { onConflict: 'user_id,company_id' })
       }
@@ -156,55 +151,34 @@ export default function UsersPage() {
     if (!editUser || !editForm.roles.length) return
     setSaving(true)
     try {
-      const primaryRoleId: Record<string, string> = {
-        MAKER: '3439de3b-d891-4852-9ecb-9c143f4c2516',
-        L1: '36689185-99ec-4d70-8037-5797884e5e78',
-        L2: '097c907d-6e1c-433f-ab45-16d9be64a1ad',
-        L3: 'ca9a3015-bd1a-44df-aaa1-bf822f6261a5',
-        FINANCE: '0fafb943-5a6e-468f-a6da-0fded964c173',
-        ADMIN: 'd4ca2a99-039e-4976-b7d1-a42ef2894477',
-      }
-      // Update all company_members rows for this user
-      const updatePayload = {
-        roles: editForm.roles,
-        role_id: primaryRoleId[editForm.roles[0]],
-        department: editForm.department || null,
-        manages_department: editForm.manages_department,
-      }
-      console.log('Updating user_id:', editUser.user_id, 'payload:', updatePayload)
+      // Use server-side API route to bypass RLS
+      const res = await fetch('/api/users/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: editUser.user_id,
+          roles: editForm.roles,
+          department: editForm.department,
+          manages_department: editForm.manages_department === true,
+        }),
+      })
+      const result = await res.json()
+      if (!res.ok) throw new Error(result.error || 'Update failed')
 
-      const { data: updatedRows, error: updateError } = await supabase
-        .from('company_members')
-        .update(updatePayload)
-        .eq('user_id', editUser.user_id)
-        .eq('is_active', true)
-        .select()
-
-      console.log('Update result - rows:', updatedRows, 'error:', updateError)
-
-      if (updateError) throw updateError
-      if (!updatedRows || updatedRows.length === 0) {
-        alert('Warning: no rows were updated. The user may not have active company_members records.')
-      }
-
-      if (editForm.department) {
-        await supabase.from('user_profiles').update({ department: editForm.department }).eq('id', editUser.user_id)
-      }
-
-      // Update local state immediately so UI reflects change before reload
+      // Update local state immediately
       setUsers(prev => prev.map(u => u.user_id === editUser.user_id
-        ? { ...u, roles: editForm.roles, department: editForm.department, manages_department: editForm.manages_department }
+        ? { ...u, roles: editForm.roles, department: editForm.department, manages_department: editForm.manages_department === true }
         : u
       ))
       setShowEdit(false); setEditUser(null)
       await load()
-    } catch (e: any) { alert('Error: ' + e.message) }
+    } catch (e: any) { alert('Error saving: ' + e.message) }
     setSaving(false)
   }
 
   function openEdit(u: any) {
     setEditUser(u)
-    setEditForm({ department: u.department, roles: [...u.roles], manages_department: u.manages_department })
+    setEditForm({ department: u.department, roles: [...u.roles], manages_department: u.manages_department === true })
     setShowEdit(true)
   }
 
@@ -251,7 +225,6 @@ export default function UsersPage() {
         </button>
       </div>
 
-      {/* Approval flow info */}
       <div style={{ padding: '12px 16px', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 8, fontSize: 13, color: '#5b21b6', marginBottom: 20 }}>
         <strong>Approval routing (USD):</strong>&nbsp;
         Under $10k → L1 only · $10k–$25k → L1 then L2 · Above $25k → L1 → L2 → L3 · Finance processes after all approvals
