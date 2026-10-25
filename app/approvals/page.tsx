@@ -194,7 +194,6 @@ export default function ApprovalsPage() {
                 financeUsers.map((uid: string) => ({
                   document_id: po.id,
                   document_type: 'purchase_order',
-                  entity_id: entityId,
                   submitted_by: uid,
                   status: 'submitted',
                   level: 'FINANCE',
@@ -227,7 +226,6 @@ export default function ApprovalsPage() {
                 nextApprovers.map((uid: string) => ({
                   document_id: po.id,
                   document_type: 'purchase_order',
-                  entity_id: entityId,
                   submitted_by: uid,
                   status: 'submitted',
                   level: nextLevel,
