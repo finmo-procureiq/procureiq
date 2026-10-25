@@ -379,6 +379,135 @@ export default function RequestsPage() {
     } catch { return `${cur} ${amount.toLocaleString()}` }
   }
 
+  function generatePDF(order: any, history: any[]) {
+    const co = companiesMap[order.company_id]
+    const entityName = co?.name || ''
+    const entityCode = co?.code || ''
+    const sc = statusConfig[order.status] || { label: order.status, color: '#6b7280' }
+
+    const approvalRows = history.map((a: any) => {
+      const name = a.approver?.full_name || a.approver?.email || 'Approver'
+      const statusLabel = a.status === 'approved' ? '✓ Approved' : a.status === 'rejected' ? '✗ Rejected' : '⏳ Pending'
+      const statusColor = a.status === 'approved' ? '#16a34a' : a.status === 'rejected' ? '#dc2626' : '#d97706'
+      const date = a.responded_at ? new Date(a.responded_at).toLocaleString('en-IN') : '—'
+      return `
+        <tr>
+          <td style="padding:10px 14px;border-bottom:1px solid #f3f4f6;font-size:13px">${a.level}</td>
+          <td style="padding:10px 14px;border-bottom:1px solid #f3f4f6;font-size:13px">${name}</td>
+          <td style="padding:10px 14px;border-bottom:1px solid #f3f4f6;font-size:13px;color:${statusColor};font-weight:600">${statusLabel}</td>
+          <td style="padding:10px 14px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#9ca3af">${date}</td>
+          <td style="padding:10px 14px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;font-style:italic">${a.notes || '—'}</td>
+        </tr>`
+    }).join('')
+
+    const chainHtml = (order.required_levels || []).map((lvl: string) => {
+      const done = history.some(a => a.level === lvl && a.status === 'approved')
+      const rejected = history.some(a => a.level === lvl && a.status === 'rejected')
+      const bg = done ? '#f0fdf4' : rejected ? '#fef2f2' : '#fef3c7'
+      const color = done ? '#16a34a' : rejected ? '#dc2626' : '#d97706'
+      return `<span style="padding:4px 12px;border-radius:20px;background:${bg};color:${color};font-size:12px;font-weight:600;margin:2px">${done?'✓ ':rejected?'✗ ':''}${lvl}</span>`
+    }).join('<span style="color:#9ca3af;margin:0 4px">→</span>')
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>PO ${order.po_number}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, Arial, sans-serif; color: #111827; background: #fff; padding: 40px; }
+    @media print { body { padding: 20px; } .no-print { display: none; } }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 2px solid #9B72F5; }
+    .brand { font-size: 22px; font-weight: 700; color: #9B72F5; }
+    .brand span { font-size: 12px; color: #9ca3af; font-weight: 400; display: block; margin-top: 2px; }
+    .status-badge { padding: 5px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; }
+    h2 { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+    .po-number { font-family: monospace; font-size: 13px; color: #6b7280; margin-bottom: 4px; }
+    .section { margin-bottom: 24px; }
+    .section-title { font-size: 11px; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .field label { font-size: 11px; color: #9ca3af; display: block; margin-bottom: 3px; }
+    .field value { font-size: 14px; font-weight: 500; color: #374151; }
+    .amount { font-size: 24px; font-weight: 700; color: #111827; }
+    .box { background: #f9fafb; border-radius: 8px; padding: 14px; font-size: 13px; color: #6b7280; line-height: 1.5; }
+    .justification { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 14px; font-size: 13px; color: #92400e; }
+    table { width: 100%; border-collapse: collapse; }
+    th { padding: 10px 14px; text-align: left; font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+    .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #9ca3af; display: flex; justify-content: space-between; }
+    .print-btn { position: fixed; top: 20px; right: 20px; background: #9B72F5; color: #fff; border: none; padding: 10px 18px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <button class="no-print print-btn" onclick="window.print()">🖨 Print / Save PDF</button>
+
+  <div class="header">
+    <div class="brand">ProcureIQ<span>${entityName} · ${entityCode}</span></div>
+    <div>
+      <div class="po-number">${order.po_number}</div>
+      <span class="status-badge" style="background:${sc.bg||'#f3f4f6'};color:${sc.color}">${sc.label}</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>${order.title}</h2>
+    <div style="margin-top:4px;font-size:13px;color:#6b7280">Submitted ${new Date(order.created_at).toLocaleDateString('en-IN', { day:'numeric', month:'long', year:'numeric' })}</div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Summary</div>
+    <div class="grid">
+      <div class="field"><label>Amount</label><div class="amount">${fmtAmt(order.amount, order.currency || 'INR')}</div></div>
+      <div class="field"><label>Department</label><div style="font-size:14px;font-weight:500">${order.department || '—'}</div></div>
+      <div class="field"><label>Supplier</label><div style="font-size:14px;font-weight:500">${order.supplier?.name || '—'}</div></div>
+      <div class="field"><label>Currency</label><div style="font-size:14px;font-weight:500">${order.currency || 'INR'}</div></div>
+      <div class="field"><label>Entity</label><div style="font-size:14px;font-weight:500">${entityName}</div></div>
+      <div class="field"><label>Invoice Ref</label><div style="font-size:14px;font-weight:500">${order.invoice_ref || '—'}</div></div>
+    </div>
+  </div>
+
+  ${order.description ? `
+  <div class="section">
+    <div class="section-title">Description</div>
+    <div class="box">${order.description}</div>
+  </div>` : ''}
+
+  ${order.justification ? `
+  <div class="section">
+    <div class="section-title">Business Justification</div>
+    <div class="justification">${order.justification}</div>
+  </div>` : ''}
+
+  ${(order.required_levels?.length > 0) ? `
+  <div class="section">
+    <div class="section-title">Approval Chain</div>
+    <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;padding:10px 0">${chainHtml}</div>
+  </div>` : ''}
+
+  ${history.length > 0 ? `
+  <div class="section">
+    <div class="section-title">Approval Trail</div>
+    <table>
+      <thead><tr>
+        <th>Level</th><th>Approver</th><th>Decision</th><th>Date</th><th>Notes</th>
+      </tr></thead>
+      <tbody>${approvalRows}</tbody>
+    </table>
+  </div>` : ''}
+
+  <div class="footer">
+    <span>Generated by ProcureIQ Enterprise · ${new Date().toLocaleString('en-IN')}</span>
+    <span>${order.po_number}</span>
+  </div>
+</body>
+</html>`
+
+    const win = window.open('', '_blank')
+    if (win) {
+      win.document.write(html)
+      win.document.close()
+    }
+  }
+
   if (loading) return <div style={{ padding:'48px', textAlign:'center', color:'#9ca3af', fontFamily:'sans-serif' }}>Loading requests...</div>
 
   return (
@@ -608,7 +737,11 @@ export default function RequestsPage() {
                   </button>
                 </div>
               )}
-              <div style={{ marginLeft:'auto' }}>
+              <div style={{ marginLeft:'auto', display:'flex', gap:'8px' }}>
+                <button onClick={() => generatePDF(selectedOrder, approvalHistory)}
+                  style={{ padding:'9px 16px', border:'1px solid #9B72F5', borderRadius:'8px', background:'#fff', color:'#9B72F5', fontSize:'14px', fontWeight:'500', cursor:'pointer' }}>
+                  ⬇ PDF
+                </button>
                 <button onClick={() => { setSelectedOrder(null); setApprovalHistory([]); setEditMode(false); setEditForm(null) }}
                   style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>
                   Close
