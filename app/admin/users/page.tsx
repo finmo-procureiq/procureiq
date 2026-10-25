@@ -2,15 +2,6 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/browser'
 
-const COMPANIES = [
-  { id: '33a0603c-5b4e-4418-9683-1a5d544560ea', name: 'Acme India Pvt Ltd' },
-  { id: 'f1d448b1-bc01-4f86-b3fc-6bc0b31c992e', name: 'Acme Singapore Pte Ltd' },
-  { id: '485d369d-087f-4776-a70b-6d1203e29c2d', name: 'Acme UAE LLC' },
-  { id: '8d37db04-7eb7-4b76-afed-df2a50590d7f', name: 'Finmo Tech Pte Ltd' },
-  { id: 'fcf15fb0-29e9-466d-aad2-5b0cf2089a0b', name: 'Finmo Tech India Pvt Ltd' },
-]
-const COMPANY_MAP: Record<string, string> = Object.fromEntries(COMPANIES.map(c => [c.id, c.name]))
-
 const ALL_ROLES = ['MAKER', 'L1', 'L2', 'L3', 'FINANCE', 'ADMIN']
 const ROLE_LABELS: Record<string, string> = {
   MAKER: 'Maker', L1: 'L1 Approver', L2: 'L2 Approver',
@@ -30,6 +21,7 @@ const DEPARTMENTS = ['IT','Finance','HR','GatewayOps','Compliance','FinOps','Rev
 
 export default function UsersPage() {
   const [users, setUsers] = useState<any[]>([])
+  const [companies, setCompanies] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
@@ -37,18 +29,28 @@ export default function UsersPage() {
   const [saving, setSaving] = useState(false)
 
   const [addForm, setAddForm] = useState({
-    email: '', company_id: 'all', department: '',
+    email: '', company_ids: [] as string[], department: '',
     roles: [] as string[], manages_department: false
   })
   const [editForm, setEditForm] = useState({
-    department: '', roles: [] as string[], manages_department: false
+    department: '', roles: [] as string[], manages_department: false,
+    company_ids: [] as string[]
   })
 
   const supabase = createClient()
-  useEffect(() => { load() }, [])
+  useEffect(() => { init() }, [])
 
-  async function load() {
+  async function init() {
+    const { data: cos } = await supabase.from('companies').select('id, name, code').eq('is_active', true).order('name')
+    setCompanies(cos || [])
+    await load(cos || [])
+  }
+
+  async function load(cos?: any[]) {
     setLoading(true)
+    const companyList = cos || companies
+    const companyMap: Record<string, string> = Object.fromEntries(companyList.map((c: any) => [c.id, c.name]))
+
     const { data: members } = await supabase
       .from('company_members')
       .select('id, company_id, user_id, role_id, roles, department, manages_department')
@@ -71,21 +73,6 @@ export default function UsersPage() {
       if (!grouped[uid]) {
         const p = profileMap[uid] || {}
         let roles: string[] = m.roles?.filter(Boolean) || []
-        if (!roles.length && m.role_id) {
-          const legacyMap: Record<string, string> = {
-            '3439de3b-d891-4852-9ecb-9c143f4c2516': 'MAKER',
-            '824f70e7-bdcf-41af-a57f-72f4c2295173': 'MAKER',
-            '299f57cd-13c7-49d7-b4c3-3d6111ba78f6': 'MAKER',
-            '878b9e57-6825-43ad-ab6a-9ed1301f88c1': 'MAKER',
-            'f7c2af7d-a798-4cca-bf93-97b6ec1ab367': 'MAKER',
-            '36689185-99ec-4d70-8037-5797884e5e78': 'L1',
-            '097c907d-6e1c-433f-ab45-16d9be64a1ad': 'L2',
-            'ca9a3015-bd1a-44df-aaa1-bf822f6261a5': 'L3',
-            '0fafb943-5a6e-468f-a6da-0fded964c173': 'FINANCE',
-            'd4ca2a99-039e-4976-b7d1-a42ef2894477': 'ADMIN',
-          }
-          roles = legacyMap[m.role_id] ? [legacyMap[m.role_id]] : ['MAKER']
-        }
         grouped[uid] = {
           user_id: uid,
           email: p.email || uid,
@@ -94,11 +81,13 @@ export default function UsersPage() {
           manages_department: m.manages_department === true,
           roles,
           companies: [],
+          company_ids: [],
           member_rows: [],
         }
       }
-      const name = COMPANY_MAP[m.company_id]
+      const name = companyMap[m.company_id]
       if (name && !grouped[uid].companies.includes(name)) grouped[uid].companies.push(name)
+      if (!grouped[uid].company_ids.includes(m.company_id)) grouped[uid].company_ids.push(m.company_id)
       grouped[uid].member_rows.push(m.id)
     }
     setUsers(Object.values(grouped))
@@ -109,8 +98,12 @@ export default function UsersPage() {
     setter(current.includes(role) ? current.filter(r => r !== role) : [...current, role])
   }
 
+  function toggleCompany(cid: string, current: string[], setter: (c: string[]) => void) {
+    setter(current.includes(cid) ? current.filter(c => c !== cid) : [...current, cid])
+  }
+
   async function handleAdd() {
-    if (!addForm.email || !addForm.roles.length) return
+    if (!addForm.email || !addForm.roles.length || !addForm.company_ids.length) return
     setSaving(true)
     try {
       const { data: profile } = await supabase
@@ -120,19 +113,9 @@ export default function UsersPage() {
         alert('User not found. They must log in at https://procureiq-gdja.onrender.com first.')
         setSaving(false); return
       }
-      const companyList = addForm.company_id === 'all' ? COMPANIES.map(c => c.id) : [addForm.company_id]
-      const primaryRoleId: Record<string, string> = {
-        MAKER: '3439de3b-d891-4852-9ecb-9c143f4c2516',
-        L1: '36689185-99ec-4d70-8037-5797884e5e78',
-        L2: '097c907d-6e1c-433f-ab45-16d9be64a1ad',
-        L3: 'ca9a3015-bd1a-44df-aaa1-bf822f6261a5',
-        FINANCE: '0fafb943-5a6e-468f-a6da-0fded964c173',
-        ADMIN: 'd4ca2a99-039e-4976-b7d1-a42ef2894477',
-      }
-      for (const cid of companyList) {
+      for (const cid of addForm.company_ids) {
         await supabase.from('company_members').upsert({
           user_id: profile.id, company_id: cid,
-          role_id: primaryRoleId[addForm.roles[0]],
           roles: addForm.roles,
           department: addForm.department || null,
           manages_department: addForm.manages_department === true,
@@ -140,7 +123,7 @@ export default function UsersPage() {
         }, { onConflict: 'user_id,company_id' })
       }
       setShowAdd(false)
-      setAddForm({ email: '', company_id: 'all', department: '', roles: [], manages_department: false })
+      setAddForm({ email: '', company_ids: [], department: '', roles: [], manages_department: false })
       await load()
       alert('User added successfully!')
     } catch (e: any) { alert('Error: ' + e.message) }
@@ -148,52 +131,50 @@ export default function UsersPage() {
   }
 
   async function handleEdit() {
-    if (!editUser || !editForm.roles.length) return
+    if (!editUser || !editForm.roles.length || !editForm.company_ids.length) return
     setSaving(true)
-    const newManagesDept = editForm.manages_department === true
     try {
-      // Try server-side API route first (bypasses RLS)
-      let saved = false
-      try {
-        const res = await fetch('/api/users/update', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: editUser.user_id,
-            roles: editForm.roles,
-            department: editForm.department,
-            manages_department: newManagesDept,
-          }),
-        })
-        const result = await res.json()
-        if (res.ok) saved = true
-        else console.warn('API route error:', result.error)
-      } catch (apiErr) {
-        console.warn('API route failed, falling back to direct update:', apiErr)
-      }
+      const allCompanyIds = companies.map((c: any) => c.id)
+      const toAdd = editForm.company_ids.filter((cid: string) => !editUser.company_ids.includes(cid))
+      const toRemove = editUser.company_ids.filter((cid: string) => !editForm.company_ids.includes(cid))
+      const toUpdate = editForm.company_ids.filter((cid: string) => editUser.company_ids.includes(cid))
 
-      // Fallback: direct Supabase update
-      if (!saved) {
-        const primaryRoleId: Record<string, string> = {
-          MAKER: '3439de3b-d891-4852-9ecb-9c143f4c2516',
-          L1: '36689185-99ec-4d70-8037-5797884e5e78',
-          L2: '097c907d-6e1c-433f-ab45-16d9be64a1ad',
-          L3: 'ca9a3015-bd1a-44df-aaa1-bf822f6261a5',
-          FINANCE: '0fafb943-5a6e-468f-a6da-0fded964c173',
-          ADMIN: 'd4ca2a99-039e-4976-b7d1-a42ef2894477',
-        }
-        const { error } = await supabase.from('company_members').update({
+      // Update existing entity memberships
+      for (const cid of toUpdate) {
+        await supabase.from('company_members').update({
           roles: editForm.roles,
-          role_id: primaryRoleId[editForm.roles[0]],
           department: editForm.department || null,
-          manages_department: newManagesDept,
-        }).eq('user_id', editUser.user_id).eq('is_active', true)
-        if (error) throw error
+          manages_department: editForm.manages_department === true,
+        }).eq('user_id', editUser.user_id).eq('company_id', cid).eq('is_active', true)
       }
 
-      // Update local state immediately — do NOT reload from DB (would overwrite with stale RLS-filtered data)
+      // Add new entity memberships
+      for (const cid of toAdd) {
+        await supabase.from('company_members').upsert({
+          user_id: editUser.user_id, company_id: cid,
+          roles: editForm.roles,
+          department: editForm.department || null,
+          manages_department: editForm.manages_department === true,
+          is_active: true,
+        }, { onConflict: 'user_id,company_id' })
+      }
+
+      // Remove entity access
+      for (const cid of toRemove) {
+        await supabase.from('company_members')
+          .update({ is_active: false })
+          .eq('user_id', editUser.user_id).eq('company_id', cid)
+      }
+
       setUsers(prev => prev.map(u => u.user_id === editUser.user_id
-        ? { ...u, roles: [...editForm.roles], department: editForm.department, manages_department: newManagesDept }
+        ? {
+            ...u,
+            roles: [...editForm.roles],
+            department: editForm.department,
+            manages_department: editForm.manages_department,
+            company_ids: [...editForm.company_ids],
+            companies: companies.filter((c: any) => editForm.company_ids.includes(c.id)).map((c: any) => c.name),
+          }
         : u
       ))
       setShowEdit(false)
@@ -204,12 +185,17 @@ export default function UsersPage() {
 
   function openEdit(u: any) {
     setEditUser(u)
-    setEditForm({ department: u.department, roles: [...u.roles], manages_department: u.manages_department === true })
+    setEditForm({
+      department: u.department,
+      roles: [...u.roles],
+      manages_department: u.manages_department === true,
+      company_ids: [...u.company_ids],
+    })
     setShowEdit(true)
   }
 
   async function deactivate(userId: string, email: string) {
-    if (!confirm(`Deactivate ${email}?`)) return
+    if (!confirm(`Deactivate ${email}? This removes all their entity access.`)) return
     await supabase.from('company_members').update({ is_active: false }).eq('user_id', userId)
     await load()
   }
@@ -225,11 +211,32 @@ export default function UsersPage() {
           const c = ROLE_COLORS[r]
           return (
             <button key={r} type="button" onClick={() => toggleRole(r, selected, onChange)}
-              style={{ padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: active ? 'none' : '1px solid #e5e7eb',
+              style={{ padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                border: active ? 'none' : '1px solid #e5e7eb',
                 background: active ? c.bg : '#fff', color: active ? c.color : '#9ca3af',
                 outline: active ? `2px solid ${c.color}` : 'none', outlineOffset: 1 }}>
               {ROLE_LABELS[r]}
             </button>
+          )
+        })}
+      </div>
+    )
+  }
+
+  function EntityPicker({ selected, onChange }: { selected: string[], onChange: (c: string[]) => void }) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {companies.map((c: any) => {
+          const active = selected.includes(c.id)
+          return (
+            <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', border: `1px solid ${active ? '#9B72F5' : '#e5e7eb'}`, borderRadius: 8, cursor: 'pointer', background: active ? '#f5f3ff' : '#fff' }}>
+              <input type="checkbox" checked={active} onChange={() => toggleCompany(c.id, selected, onChange)}
+                style={{ width: 15, height: 15, cursor: 'pointer', accentColor: '#9B72F5' }} />
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: active ? '#7c3aed' : '#374151' }}>{c.name}</div>
+                <div style={{ fontSize: 11, color: '#9ca3af' }}>{c.code}</div>
+              </div>
+            </label>
           )
         })}
       </div>
@@ -252,8 +259,8 @@ export default function UsersPage() {
       </div>
 
       <div style={{ padding: '12px 16px', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 8, fontSize: 13, color: '#5b21b6', marginBottom: 20 }}>
-        <strong>Approval routing (USD):</strong>&nbsp;
-        Under $10k → L1 only · $10k–$25k → L1 then L2 · Above $25k → L1 → L2 → L3 · Finance processes after all approvals
+        <strong>Approval routing:</strong>&nbsp;
+        Under 10k → L1 only · 10k–25k → L1 then L2 · Above 25k → L1 → L2 → L3 · Finance processes after all approvals
       </div>
 
       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden' }}>
@@ -288,7 +295,13 @@ export default function UsersPage() {
                     })}
                   </div>
                 </td>
-                <td style={{ padding: '12px 16px', color: '#6b7280', fontSize: 12 }}>{u.companies.join(', ') || '—'}</td>
+                <td style={{ padding: '12px 16px', color: '#6b7280', fontSize: 12 }}>
+                  {u.companies.length > 0
+                    ? u.companies.map((name: string) => (
+                        <div key={name} style={{ fontSize: 12, color: '#374151' }}>{name}</div>
+                      ))
+                    : <span style={{ color: '#d1d5db' }}>—</span>}
+                </td>
                 <td style={{ padding: '12px 16px' }}>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button onClick={() => openEdit(u)}
@@ -322,15 +335,13 @@ export default function UsersPage() {
               <div>
                 <label style={lbl}>Email Address *</label>
                 <input style={inp} type="email" value={addForm.email}
-                  onChange={e => setAddForm({ ...addForm, email: e.target.value })} placeholder="name@finmo.net" />
-                <p style={{ fontSize: 11, color: '#9ca3af', margin: '4px 0 0' }}>User must have logged in with Google SSO first</p>
+                  onChange={e => setAddForm({ ...addForm, email: e.target.value })} placeholder="name@company.com" />
+                <p style={{ fontSize: 11, color: '#9ca3af', margin: '4px 0 0' }}>User must have logged in first</p>
               </div>
               <div>
-                <label style={lbl}>Entity Access</label>
-                <select style={inp} value={addForm.company_id} onChange={e => setAddForm({ ...addForm, company_id: e.target.value })}>
-                  <option value="all">All Entities ({COMPANIES.length})</option>
-                  {COMPANIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                <label style={lbl}>Entity Access * (select all that apply)</label>
+                <EntityPicker selected={addForm.company_ids} onChange={c => setAddForm({ ...addForm, company_ids: c })} />
+                {addForm.company_ids.length === 0 && <p style={{ fontSize: 11, color: '#ef4444', margin: '4px 0 0' }}>Select at least one entity</p>}
               </div>
               <div>
                 <label style={lbl}>Department</label>
@@ -356,9 +367,9 @@ export default function UsersPage() {
             <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
               <button onClick={() => setShowAdd(false)}
                 style={{ padding: '9px 18px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', fontSize: 14, cursor: 'pointer' }}>Cancel</button>
-              <button onClick={handleAdd} disabled={saving || !addForm.email || !addForm.roles.length}
+              <button onClick={handleAdd} disabled={saving || !addForm.email || !addForm.roles.length || !addForm.company_ids.length}
                 style={{ padding: '9px 18px', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 500, cursor: 'pointer', color: '#fff',
-                  background: (!addForm.email || !addForm.roles.length) ? '#c4b5fd' : '#9B72F5' }}>
+                  background: (!addForm.email || !addForm.roles.length || !addForm.company_ids.length) ? '#c4b5fd' : '#9B72F5' }}>
                 {saving ? 'Adding...' : 'Add User'}
               </button>
             </div>
@@ -376,6 +387,11 @@ export default function UsersPage() {
             </div>
             <p style={{ fontSize: 13, color: '#9ca3af', margin: '0 0 20px' }}>{editUser.full_name} · {editUser.email}</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <label style={lbl}>Entity Access * (check to grant, uncheck to remove)</label>
+                <EntityPicker selected={editForm.company_ids} onChange={c => setEditForm({ ...editForm, company_ids: c })} />
+                {editForm.company_ids.length === 0 && <p style={{ fontSize: 11, color: '#ef4444', margin: '4px 0 0' }}>Select at least one entity</p>}
+              </div>
               <div>
                 <label style={lbl}>Department</label>
                 <select style={inp} value={editForm.department} onChange={e => setEditForm({ ...editForm, department: e.target.value })}>
@@ -398,7 +414,7 @@ export default function UsersPage() {
             <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
               <button onClick={() => setShowEdit(false)}
                 style={{ padding: '9px 18px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', fontSize: 14, cursor: 'pointer' }}>Cancel</button>
-              <button onClick={handleEdit} disabled={saving || !editForm.roles.length}
+              <button onClick={handleEdit} disabled={saving || !editForm.roles.length || !editForm.company_ids.length}
                 style={{ padding: '9px 18px', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 500, cursor: 'pointer', color: '#fff', background: '#9B72F5' }}>
                 {saving ? 'Saving...' : 'Save Changes'}
               </button>
