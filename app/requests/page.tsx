@@ -120,7 +120,7 @@ export default function RequestsPage() {
       .eq('is_active', true)
 
     return (members || [])
-      .filter((m: any) => Array.isArray(m.roles) && m.roles.includes(level))
+      .filter((m: any) => Array.isArray(m.roles) && (m.roles.includes(level) || m.roles.includes('ADMIN')))
       .map((m: any) => m.user_id)
   }
 
