@@ -21,6 +21,8 @@ export default function ApprovalsPage() {
   const [historyAll, setHistoryAll] = useState<any[]>([])
   const [sameLevel, setSameLevel] = useState<any[]>([])
   const [companiesMap, setCompaniesMap] = useState<Record<string, { code: string; currency: string; name: string }>>({})
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkActing, setBulkActing] = useState(false)
 
   const supabase = createClient()
   useEffect(() => { init() }, [])
@@ -289,6 +291,26 @@ export default function ApprovalsPage() {
     setActing(false)
   }
 
+  async function handleBulkApprove() {
+    if (!user || selectedIds.size === 0) return
+    if (!confirm(`Approve ${selectedIds.size} PO${selectedIds.size > 1 ? 's' : ''}?`)) return
+    setBulkActing(true)
+    const toApprove = requests.filter(r => selectedIds.has(r.id))
+    for (const req of toApprove) {
+      await handleAction(req, 'approve')
+    }
+    setSelectedIds(new Set())
+    setBulkActing(false)
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
   const fmtAmt = (amount: number, cur: string) => {
     try {
       return new Intl.NumberFormat('en-US', { style:'currency', currency: cur || 'INR', maximumFractionDigits: 2 }).format(amount)
@@ -341,14 +363,33 @@ export default function ApprovalsPage() {
           </div>
         ) : (
           <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+            {/* Bulk action bar */}
+            <div style={{ display:'flex', alignItems:'center', gap:'12px', padding:'12px 16px', background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:'10px' }}>
+              <input type="checkbox"
+                checked={selectedIds.size === requests.length && requests.length > 0}
+                onChange={e => setSelectedIds(e.target.checked ? new Set(requests.map(r => r.id)) : new Set())}
+                style={{ width:'16px', height:'16px', cursor:'pointer', accentColor:'#9B72F5' }}/>
+              <span style={{ fontSize:'13px', color:'#6b7280' }}>
+                {selectedIds.size === 0 ? 'Select all' : `${selectedIds.size} selected`}
+              </span>
+              {selectedIds.size > 0 && (
+                <button onClick={handleBulkApprove} disabled={bulkActing}
+                  style={{ marginLeft:'auto', padding:'7px 18px', border:'none', borderRadius:'8px', background:'#16a34a', color:'#fff', fontSize:'13px', fontWeight:'600', cursor:'pointer', opacity: bulkActing ? 0.7 : 1 }}>
+                  {bulkActing ? 'Approving...' : `✓ Approve ${selectedIds.size} Selected`}
+                </button>
+              )}
+            </div>
+
             {requests.map((req: any) => {
               const po = req.purchase_order
               if (!po) return null
               return (
-                <div key={req.id} style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:'12px', padding:'20px' }}
-                  onMouseEnter={e => (e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)')}
+                <div key={req.id} style={{ background: selectedIds.has(req.id) ? '#faf8ff' : '#fff', border: selectedIds.has(req.id) ? '1px solid #c4b5fd' : '1px solid #e5e7eb', borderRadius:'12px', padding:'20px' }}
+                  onMouseEnter={e => { if (!selectedIds.has(req.id)) e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)' }}
                   onMouseLeave={e => (e.currentTarget.style.boxShadow='')}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'16px' }}>
+                  <input type="checkbox" checked={selectedIds.has(req.id)} onChange={() => toggleSelect(req.id)}
+                    style={{ marginTop:'3px', width:'16px', height:'16px', cursor:'pointer', flexShrink:0, accentColor:'#9B72F5' }}/>
                     <div style={{ flex:1 }}>
                       <div style={{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'4px' }}>
                         <span style={{ fontFamily:'monospace', fontSize:'12px', color:'#9ca3af' }}>{po.po_number}</span>

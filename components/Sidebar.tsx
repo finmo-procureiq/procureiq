@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/browser'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import GlobalSearch from './GlobalSearch'
 
 export default function Sidebar() {
   const [companies, setCompanies] = useState<any[]>([])
@@ -72,7 +73,6 @@ export default function Sidebar() {
         className="mobile-menu-btn"
         onClick={() => setMobileOpen(o => !o)}
         style={{
-          display:'none', // hidden on desktop via CSS
           position:'fixed', top:14, left:14, zIndex:200,
           background:'#3C2B5A', border:'none', borderRadius:'8px',
           padding:'8px 10px', cursor:'pointer', color:'#fff', fontSize:'18px',
@@ -102,6 +102,11 @@ export default function Sidebar() {
         <div style={{ fontSize:'10px', color:'rgba(255,255,255,0.4)', textTransform:'uppercase', letterSpacing:'1.5px', marginTop:'3px' }}>Enterprise</div>
       </div>
 
+
+      {/* Global search */}
+      <div style={{ padding:'8px 12px', borderBottom:'1px solid rgba(255,255,255,0.08)' }}>
+        <GlobalSearch />
+      </div>
 
       <nav style={{ flex:1, padding:'8px 0', overflowY:'auto' }}>
         <NavLink href="/dashboard" label="Dashboard" pathname={pathname} />

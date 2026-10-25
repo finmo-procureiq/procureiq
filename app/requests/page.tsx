@@ -408,7 +408,7 @@ export default function RequestsPage() {
     const co = companiesMap[order.company_id]
     const entityName = co?.name || ''
     const entityCode = co?.code || ''
-    const sc = statusConfig[order.status] || { label: order.status, color: '#6b7280' }
+    const sc = statusConfig[order.status] || { label: order.status, color: '#6b7280', bg: '#f3f4f6' }
 
     const approvalRows = history.map((a: any) => {
       const name = a.approver?.full_name || a.approver?.email || 'Approver'
@@ -662,35 +662,88 @@ export default function RequestsPage() {
               </div>
             )}
 
-            {/* Approval history */}
-            {approvalHistory.length > 0 && (
-              <div>
-                <div style={{ fontSize:'11px', color:'#9ca3af', marginBottom:'8px', fontWeight:'600' }}>APPROVAL HISTORY</div>
-                <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
-                  {approvalHistory.map((a: any) => {
-                    const isApproved = a.status === 'approved'
-                    const isRejected = a.status === 'rejected'
+            {/* PO Status Timeline */}
+            <div style={{ marginBottom:'12px' }}>
+              <div style={{ fontSize:'11px', color:'#9ca3af', marginBottom:'12px', fontWeight:'600', letterSpacing:'0.5px' }}>STATUS TIMELINE</div>
+              <div style={{ position:'relative' }}>
+                {/* Build timeline steps */}
+                {(() => {
+                  const steps: { label: string; sublabel?: string; status: 'done'|'current'|'pending'|'rejected'; time?: string; note?: string }[] = []
+
+                  // Step 1: Submitted
+                  steps.push({
+                    label: 'Submitted',
+                    sublabel: selectedOrder.creator?.full_name || selectedOrder.creator?.email || 'You',
+                    status: 'done',
+                    time: selectedOrder.created_at ? new Date(selectedOrder.created_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : undefined
+                  })
+
+                  // Approval levels
+                  const levels = selectedOrder.required_levels || []
+                  for (const lvl of levels) {
+                    const history = approvalHistory.filter((a: any) => a.level === lvl)
+                    const approved = history.find((a: any) => a.status === 'approved')
+                    const rejected = history.find((a: any) => a.status === 'rejected')
+                    const isPO_rejected = selectedOrder.status === 'rejected'
+                    const currentLevelPending = selectedOrder.status === `pending_${lvl.toLowerCase()}` || selectedOrder.status === 'submitted'
+
+                    steps.push({
+                      label: lvl + ' Approval',
+                      sublabel: approved ? (approved.approver?.full_name || approved.approver?.email || 'Approved') : rejected ? (rejected.approver?.full_name || 'Rejected') : 'Awaiting approver',
+                      status: approved ? 'done' : rejected ? 'rejected' : currentLevelPending ? 'current' : 'pending',
+                      time: approved?.responded_at ? new Date(approved.responded_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : rejected?.responded_at ? new Date(rejected.responded_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : undefined,
+                      note: rejected?.reject_reason || rejected?.notes || approved?.notes || undefined
+                    })
+                  }
+
+                  // Finance step
+                  const financeHistory = approvalHistory.filter((a: any) => a.level === 'FINANCE')
+                  const financeApproved = financeHistory.find((a: any) => a.status === 'approved')
+                  const financeRejected = financeHistory.find((a: any) => a.status === 'rejected')
+                  steps.push({
+                    label: 'Finance Approval',
+                    sublabel: financeApproved ? (financeApproved.approver?.full_name || 'Approved') : financeRejected ? (financeRejected.approver?.full_name || 'Rejected') : 'Awaiting finance',
+                    status: financeApproved ? 'done' : financeRejected ? 'rejected' : selectedOrder.status === 'pending_finance' ? 'current' : selectedOrder.status === 'approved' ? 'done' : 'pending',
+                    time: financeApproved?.responded_at ? new Date(financeApproved.responded_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : undefined,
+                  })
+
+                  // Payment step
+                  steps.push({
+                    label: 'Payment',
+                    sublabel: selectedOrder.status === 'approved' ? 'Awaiting payment' : 'Pending',
+                    status: 'pending',
+                    time: undefined
+                  })
+
+                  return steps.map((step, i) => {
+                    const isLast = i === steps.length - 1
+                    const dotColor = step.status === 'done' ? '#16a34a' : step.status === 'rejected' ? '#dc2626' : step.status === 'current' ? '#9B72F5' : '#d1d5db'
+                    const dotBg = step.status === 'done' ? '#f0fdf4' : step.status === 'rejected' ? '#fef2f2' : step.status === 'current' ? '#ede9fe' : '#f9fafb'
                     return (
-                      <div key={a.id} style={{
-                        display:'flex', alignItems:'flex-start', gap:'10px', padding:'10px 12px', borderRadius:'8px',
-                        background: isApproved ? '#f0fdf4' : isRejected ? '#fef2f2' : '#fef3c7',
-                        border: `1px solid ${isApproved ? '#bbf7d0' : isRejected ? '#fecaca' : '#fde68a'}`
-                      }}>
-                        <span style={{ fontSize:'16px' }}>{isApproved ? '✅' : isRejected ? '❌' : '⏳'}</span>
-                        <div style={{ flex:1 }}>
-                          <div style={{ fontSize:'13px', fontWeight:'500' }}>
-                            {a.approver?.full_name || a.approver?.email || 'Approver'} <span style={{ color:'#9ca3af', fontWeight:'400' }}>· {a.level}</span>
-                          </div>
-                          {a.notes && <div style={{ fontSize:'12px', color:'#6b7280', marginTop:'2px', fontStyle:'italic' }}>"{a.notes}"</div>}
-                          {a.responded_at && <div style={{ fontSize:'11px', color:'#9ca3af', marginTop:'2px' }}>{new Date(a.responded_at).toLocaleString('en-IN')}</div>}
+                      <div key={i} style={{ display:'flex', gap:'12px', position:'relative' }}>
+                        {/* Connector line */}
+                        {!isLast && <div style={{ position:'absolute', left:'15px', top:'30px', width:'2px', height:'calc(100% - 6px)', background: step.status === 'done' ? '#bbf7d0' : '#e5e7eb' }}/>}
+                        {/* Dot */}
+                        <div style={{ width:'30px', height:'30px', borderRadius:'50%', background:dotBg, border:`2px solid ${dotColor}`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, zIndex:1 }}>
+                          <span style={{ fontSize:'13px' }}>{step.status === 'done' ? '✓' : step.status === 'rejected' ? '✗' : step.status === 'current' ? '●' : '○'}</span>
                         </div>
-                        <span style={{ fontSize:'12px', fontWeight:'600', color: isApproved ? '#16a34a' : isRejected ? '#dc2626' : '#d97706', textTransform:'capitalize' }}>{a.status}</span>
+                        {/* Content */}
+                        <div style={{ paddingBottom: isLast ? 0 : '16px', flex:1 }}>
+                          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+                            <div>
+                              <div style={{ fontSize:'13px', fontWeight:'600', color: step.status === 'pending' ? '#9ca3af' : '#111827' }}>{step.label}</div>
+                              <div style={{ fontSize:'12px', color:'#9ca3af', marginTop:'1px' }}>{step.sublabel}</div>
+                              {step.note && <div style={{ fontSize:'11px', color: step.status === 'rejected' ? '#dc2626' : '#6b7280', marginTop:'3px', fontStyle:'italic' }}>"{step.note}"</div>}
+                            </div>
+                            {step.time && <div style={{ fontSize:'11px', color:'#9ca3af', textAlign:'right', flexShrink:0, marginLeft:'8px' }}>{step.time}</div>}
+                          </div>
+                        </div>
                       </div>
                     )
-                  })}
-                </div>
+                  })
+                })()}
               </div>
-            )}
+            </div>
 
             {/* Edit mode */}
             {editMode && editForm && (

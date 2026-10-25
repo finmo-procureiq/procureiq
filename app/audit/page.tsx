@@ -55,20 +55,68 @@ export default function AuditPage() {
     MARK_PAID:'#16a34a', PARTIAL_PAYMENT:'#7c3aed'
   }
 
+  function downloadCSV() {
+    const headers = ['Timestamp','User','Email','Action','Entity Type','Reference','Severity']
+    const rows = filtered.map(l => [
+      new Date(l.created_at).toLocaleString(),
+      l.user_name || '',
+      l.user_email || '',
+      l.action || '',
+      l.entity_type || '',
+      l.entity_ref || '',
+      l.severity || 'info',
+    ])
+    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type:'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href=url; a.download=`AuditTrail_${new Date().toISOString().slice(0,10)}.csv`; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function downloadPDF() {
+    const w = window.open('','_blank'); if (!w) return
+    const rows = filtered.map(l => `<tr>
+      <td style="white-space:nowrap;font-family:monospace;font-size:10px">${new Date(l.created_at).toLocaleString()}</td>
+      <td><b>${l.user_name||'—'}</b><br/><span style="color:#9ca3af;font-size:10px">${l.user_email||''}</span></td>
+      <td><span style="padding:2px 6px;border-radius:10px;font-size:10px;font-weight:600;background:${(actionColor[l.action]||'#6b7280')}22;color:${actionColor[l.action]||'#6b7280'}">${l.action}</span></td>
+      <td style="font-size:11px;color:#6b7280">${(l.entity_type||'').replace(/_/g,' ')}</td>
+      <td style="font-family:monospace;font-size:10px">${l.entity_ref||'—'}</td>
+      <td style="padding:2px 6px;border-radius:10px;font-size:10px;background:${(severityColor[l.severity||'info'])}22;color:${severityColor[l.severity||'info']}">${l.severity||'info'}</td>
+    </tr>`).join('')
+    w.document.write(`<!DOCTYPE html><html><head><title>Audit Trail</title>
+    <style>body{font-family:sans-serif;padding:24px;font-size:12px}h1{font-size:18px}table{width:100%;border-collapse:collapse}th{background:#f9fafb;padding:8px 10px;text-align:left;font-size:10px;text-transform:uppercase;color:#6b7280;border-bottom:2px solid #e5e7eb}td{padding:8px 10px;border-bottom:1px solid #f3f4f6;vertical-align:top}.footer{margin-top:20px;font-size:10px;color:#9ca3af;border-top:1px solid #e5e7eb;padding-top:10px}</style>
+    </head><body>
+    <h1>ProcureIQ — Audit Trail</h1>
+    <p style="color:#6b7280;font-size:12px">Exported ${new Date().toLocaleString()} · ${filtered.length} entries</p>
+    <table><thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Entity</th><th>Reference</th><th>Severity</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <div class="footer">ProcureIQ Enterprise · Confidential</div>
+    <script>window.onload=function(){window.print()}</script></body></html>`)
+    w.document.close()
+  }
+
   return (
     <div style={{ fontFamily:'sans-serif', padding:'32px', maxWidth:'1400px', margin:'0 auto' }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'24px' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'24px', flexWrap:'wrap', gap:'12px' }}>
         <div>
           <h1 style={{ fontSize:'24px', fontWeight:'600', marginBottom:'4px' }}>Audit Trail</h1>
           <p style={{ color:'#666', fontSize:'14px' }}>Complete tamper-proof log of all system actions</p>
         </div>
-        <div style={{ display:'flex', gap:'8px' }}>
+        <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
           <input type="text" placeholder="Search..." value={search}
             onChange={e => setSearch(e.target.value)}
-            style={{ padding:'8px 12px', border:'1px solid #d1d5db', borderRadius:'8px', fontSize:'13px', outline:'none', width:'220px' }}/>
+            style={{ padding:'8px 12px', border:'1px solid #d1d5db', borderRadius:'8px', fontSize:'13px', outline:'none', width:'180px' }}/>
           <button onClick={() => loadLogs()}
             style={{ padding:'8px 14px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'13px', cursor:'pointer' }}>
             Refresh
+          </button>
+          <button onClick={downloadCSV}
+            style={{ padding:'8px 14px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'13px', cursor:'pointer' }}>
+            ⬇ CSV
+          </button>
+          <button onClick={downloadPDF}
+            style={{ padding:'8px 14px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'13px', cursor:'pointer' }}>
+            ⬇ PDF
           </button>
         </div>
       </div>
