@@ -1,7 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/browser'
-import { getActiveCompanyId } from '@/lib/company'
 
 export default function ReportsPage() {
   const [companyId, setCompanyId] = useState('')
@@ -15,10 +14,18 @@ export default function ReportsPage() {
   useEffect(() => { init() }, [])
 
   async function init() {
-    const cid = await getActiveCompanyId()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data: members } = await supabase
+      .from('company_members').select('company_id').eq('user_id', user.id).eq('is_active', true).limit(1)
+    const cid = members?.[0]?.company_id || ''
     setCompanyId(cid)
-    const { data } = await supabase.from('companies').select('code').eq('id', cid).single()
-    if (data) setCompanyCode(data.code)
+    if (cid) {
+      const cosRes = await fetch('/api/companies')
+      const cosData = await cosRes.json()
+      const co = Array.isArray(cosData) ? cosData.find((c: any) => c.id === cid) : null
+      if (co) setCompanyCode(co.code)
+    }
   }
 
   function toCSV(headers: string[], rows: any[][]): string {
@@ -165,13 +172,13 @@ export default function ReportsPage() {
     const { data: budgets } = await supabase.from('budgets')
       .select('*').eq('company_id', companyId)
     const { data: pos } = await supabase.from('purchase_orders')
-      .select('category, total_amount, status')
+      .select('category, amount, status')
       .eq('company_id', companyId)
       .not('status', 'in', '(rejected,cancelled,recalled)')
     const rows = (budgets || []).map(b => {
       const spent = (pos || [])
         .filter(p => p.category === b.category)
-        .reduce((sum, p) => sum + Number(p.total_amount), 0)
+        .reduce((sum, p) => sum + Number(p.amount), 0)
       const pct = b.allocated > 0 ? Math.round(spent / b.allocated * 100) : 0
       return [
         b.fiscal_year, b.category,

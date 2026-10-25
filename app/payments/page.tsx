@@ -1,7 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/browser'
-import { getActiveCompanyId } from '@/lib/company'
 
 export default function PaymentsPage() {
   const [payments, setPayments] = useState<any[]>([])
@@ -30,7 +29,14 @@ export default function PaymentsPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     setUserId(user.id)
-    const cid = await getActiveCompanyId()
+    // Load user's primary entity via company_members (avoids getActiveCompanyId / RLS issue)
+    const { data: members } = await supabase
+      .from('company_members')
+      .select('company_id')
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .limit(1)
+    const cid = members?.[0]?.company_id || ''
     setCompanyId(cid)
   }
 
@@ -83,7 +89,7 @@ export default function PaymentsPage() {
 
   async function loadPOs() {
     const { data } = await supabase.from('purchase_orders').select('id, po_number')
-      .eq('status', 'approved')
+      .eq('status', 'approved').eq('company_id', companyId)
     setPOs(data || [])
   }
 

@@ -1,7 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/browser'
-import { getActiveCompanyId } from '@/lib/company'
 
 const COLORS = ['#2563eb','#16a34a','#f59e0b','#dc2626','#7c3aed','#ea580c','#0891b2','#be185d','#65a30d','#6b7280','#0f172a','#b45309']
 
@@ -21,11 +20,18 @@ export default function AnalyticsPage() {
   useEffect(() => { init() }, [])
 
   async function init() {
-    const cid = await getActiveCompanyId()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data: members } = await supabase
+      .from('company_members').select('company_id').eq('user_id', user.id).eq('is_active', true).limit(1)
+    const cid = members?.[0]?.company_id || ''
     setCompanyId(cid)
-    const { data: co } = await supabase.from('companies')
-      .select('name, currency').eq('id', cid).single()
-    if (co) { setCompanyName(co.name); setCurrency(co.currency || 'INR') }
+    if (cid) {
+      const cosRes = await fetch('/api/companies')
+      const cosData = await cosRes.json()
+      const co = Array.isArray(cosData) ? cosData.find((c: any) => c.id === cid) : null
+      if (co) { setCompanyName(co.name); setCurrency(co.currency || 'INR') }
+    }
     await loadData(cid, '', '')
   }
 
@@ -46,7 +52,7 @@ export default function AnalyticsPage() {
     const deptMap: Record<string, number> = {}
     ;(pos || []).forEach(po => {
       const dept = po.cost_center || 'Unassigned'
-      deptMap[dept] = (deptMap[dept] || 0) + Number(po.total_amount)
+      deptMap[dept] = (deptMap[dept] || 0) + Number(po.amount)
     })
     const departments = Object.entries(deptMap)
       .map(([name, amount]) => ({ name, amount }))
@@ -59,7 +65,7 @@ export default function AnalyticsPage() {
       if (!po.final_action_at) return
       const month = new Date(po.final_action_at)
         .toLocaleString('default', { month:'short', year:'2-digit' })
-      monthMap[month] = (monthMap[month] || 0) + Number(po.total_amount)
+      monthMap[month] = (monthMap[month] || 0) + Number(po.amount)
     })
     setSpendByMonth(Object.entries(monthMap).map(([month, amount]) => ({ month, amount })))
 
@@ -68,7 +74,7 @@ export default function AnalyticsPage() {
     ;(pos || []).forEach(po => {
       const name = (po.supplier as any)?.name || 'Unknown'
       if (!supMap[name]) supMap[name] = { name, amount:0, count:0 }
-      supMap[name].amount += Number(po.total_amount)
+      supMap[name].amount += Number(po.amount)
       supMap[name].count += 1
     })
     setTopSuppliers(Object.values(supMap).sort((a,b) => b.amount - a.amount).slice(0,10))

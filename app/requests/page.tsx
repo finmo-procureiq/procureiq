@@ -534,7 +534,7 @@ export default function RequestsPage() {
           </button>
         </div>
       ) : (
-        <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:'12px', overflow:'hidden' }}>
+        <div className="table-scroll-wrapper" style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:'12px', overflow:'hidden' }}>
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'14px' }}>
             <thead style={{ background:'#f9fafb' }}>
               <tr>

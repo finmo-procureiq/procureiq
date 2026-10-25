@@ -1,8 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/browser'
-import { getActiveCompanyId } from '@/lib/company'
-
 export default function AuditPage() {
   const [logs, setLogs] = useState<any[]>([])
   const [companyId, setCompanyId] = useState('')
@@ -15,7 +13,11 @@ export default function AuditPage() {
   useEffect(() => { init() }, [])
 
   async function init() {
-    const cid = await getActiveCompanyId()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data: members } = await supabase
+      .from('company_members').select('company_id').eq('user_id', user.id).eq('is_active', true).limit(1)
+    const cid = members?.[0]?.company_id || ''
     setCompanyId(cid)
     await loadLogs(cid)
   }
