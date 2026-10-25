@@ -86,14 +86,15 @@ export default function Sidebar() {
         <div className="sidebar-overlay" onClick={() => setMobileOpen(false)} />
       )}
 
-    <aside style={{
-      width:'230px', flexShrink:0, position:'fixed', top:0, left:0, bottom:0,
-      display:'flex', flexDirection:'column', zIndex:100,
-      background:'linear-gradient(180deg, #3C2B5A 0%, #4A3F6B 100%)',
-      boxShadow:'4px 0 20px rgba(60,43,90,0.3)',
-      transform: mobileOpen ? 'translateX(0)' : undefined,
-      transition:'transform 0.25s ease',
-    }}>
+    <aside
+      className={mobileOpen ? 'sidebar-mobile-open' : 'sidebar-mobile-hidden'}
+      style={{
+        width:'230px', flexShrink:0, position:'fixed', top:0, left:0, bottom:0,
+        display:'flex', flexDirection:'column', zIndex:100,
+        background:'linear-gradient(180deg, #3C2B5A 0%, #4A3F6B 100%)',
+        boxShadow:'4px 0 20px rgba(60,43,90,0.3)',
+        transition:'transform 0.25s ease',
+      }}>
       <div style={{ padding:'20px 20px 16px', borderBottom:'1px solid rgba(255,255,255,0.1)' }}>
         <div style={{ fontSize:'20px', fontWeight:'700', color:'#fff' }}>
           Procure<span style={{ color:'#C4B0F0' }}>IQ</span>

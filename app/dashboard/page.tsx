@@ -272,7 +272,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Stat Cards */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'16px', marginBottom:'24px' }}>
+      <div className="dash-stats-grid" style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'16px', marginBottom:'24px' }}>
         {statCards.map(s => (
           <div key={s.key} onClick={() => openModal(s.key)}
             style={{ background:s.bg, border:`1px solid ${s.border}`, borderRadius:'12px', padding:'20px', cursor:'pointer', transition:'transform 0.1s, box-shadow 0.1s', position:'relative' }}
@@ -287,7 +287,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Recent POs and Pending */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'16px' }}>
+      <div className="mobile-stack" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'16px' }}>
         <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:'12px', overflow:'hidden' }}>
           <div style={{ padding:'16px 20px', borderBottom:'1px solid #f3f4f6', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
             <h2 style={{ fontSize:'15px', fontWeight:'600', margin:0 }}>Recent Purchase Orders</h2>

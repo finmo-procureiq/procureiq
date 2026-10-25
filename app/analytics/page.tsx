@@ -227,7 +227,7 @@ export default function AnalyticsPage() {
         ))}
       </div>
 
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'24px' }}>
+      <div className="mobile-stack" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'24px' }}>
 
         {/* Monthly Trend */}
         <div style={{ background:'#fff', border:'1px solid #e5e7eb', borderRadius:'12px', padding:'24px' }}>
