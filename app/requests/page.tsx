@@ -25,6 +25,8 @@ export default function RequestsPage() {
   const [actioning, setActioning] = useState(false)
   const [editMode, setEditMode] = useState(false)
   const [editForm, setEditForm] = useState<any>(null)
+  const [supplierSearch, setSupplierSearch] = useState('')
+  const [supplierDropOpen, setSupplierDropOpen] = useState(false)
   const [form, setForm] = useState({
     title: '', description: '', amount: '', currency: 'INR',
     supplier_id: '', department: '', justification: '', invoice_ref: ''
@@ -806,12 +808,37 @@ export default function RequestsPage() {
                   {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
-              <div>
-                <label style={lbl}>Supplier {formSuppliers.length === 0 ? '(no approved suppliers for this entity)' : '(optional)'}</label>
-                <select style={inp} value={form.supplier_id} onChange={e => setForm({...form, supplier_id:e.target.value})}>
-                  <option value="">Select supplier...</option>
-                  {formSuppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
+              <div style={{ position:'relative' }}>
+                <label style={lbl}>Supplier (optional)</label>
+                <input
+                  style={inp}
+                  placeholder={formSuppliers.length === 0 ? 'No suppliers yet — create one first' : 'Search supplier...'}
+                  value={supplierSearch || (form.supplier_id ? formSuppliers.find(s => s.id === form.supplier_id)?.name || '' : '')}
+                  onChange={e => { setSupplierSearch(e.target.value); setForm({...form, supplier_id:''}); setSupplierDropOpen(true) }}
+                  onFocus={() => setSupplierDropOpen(true)}
+                  onBlur={() => setTimeout(() => setSupplierDropOpen(false), 150)}
+                  autoComplete="off"
+                />
+                {supplierDropOpen && (
+                  <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px', boxShadow:'0 4px 12px rgba(0,0,0,0.1)', zIndex:100, maxHeight:'200px', overflowY:'auto', marginTop:'2px' }}>
+                    {formSuppliers
+                      .filter(s => !supplierSearch || s.name.toLowerCase().includes(supplierSearch.toLowerCase()))
+                      .map(s => (
+                        <div key={s.id}
+                          onMouseDown={() => { setForm({...form, supplier_id:s.id}); setSupplierSearch(''); setSupplierDropOpen(false) }}
+                          style={{ padding:'10px 12px', cursor:'pointer', fontSize:'13px', borderBottom:'1px solid #f3f4f6' }}
+                          onMouseEnter={e => (e.currentTarget.style.background='#f9fafb')}
+                          onMouseLeave={e => (e.currentTarget.style.background='#fff')}>
+                          {s.name}
+                        </div>
+                      ))}
+                    <div
+                      onMouseDown={() => { window.open('/suppliers', '_blank'); setSupplierDropOpen(false) }}
+                      style={{ padding:'10px 12px', cursor:'pointer', fontSize:'13px', color:'#9B72F5', fontWeight:'500', borderTop:'1px solid #e5e7eb', display:'flex', alignItems:'center', gap:'6px' }}>
+                      + Create new supplier →
+                    </div>
+                  </div>
+                )}
               </div>
               <div>
                 <label style={lbl}>Invoice / Reference Number</label>
