@@ -23,6 +23,8 @@ export default function RequestsPage() {
   const [entityId, setEntityId] = useState<string | null>(null)
   const [entityCode, setEntityCode] = useState<string>('')
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
+  const [formEntityId, setFormEntityId] = useState<string | null>(null)
+  const [formSuppliers, setFormSuppliers] = useState<any[]>([])
   const [approvalHistory, setApprovalHistory] = useState<any[]>([])
   const [form, setForm] = useState({
     title: '', description: '', amount: '', currency: 'INR',
@@ -49,11 +51,13 @@ export default function RequestsPage() {
       if (member?.company_id) {
         const eid = member.company_id
         setEntityId(eid)
+        setFormEntityId(eid)
         const co = COMPANIES[eid]
         setEntityCode(co?.code || 'PO')
         // Default form currency to entity currency
         setForm(f => ({ ...f, currency: co?.currency || 'INR' }))
         await loadAll(eid)
+        await loadFormSuppliers(eid)
       }
     } catch (e) {
       console.error('init error:', e)
@@ -80,6 +84,23 @@ export default function RequestsPage() {
     } catch (e) {
       console.error('loadAll error:', e)
     }
+  }
+
+  async function loadFormSuppliers(eid: string) {
+    const { data } = await supabase
+      .from('suppliers')
+      .select('id, name')
+      .eq('company_id', eid)
+      .eq('status', 'approved')
+      .order('name')
+    setFormSuppliers(data || [])
+  }
+
+  async function handleFormEntityChange(eid: string) {
+    setFormEntityId(eid)
+    const co = COMPANIES[eid]
+    setForm(f => ({ ...f, currency: co?.currency || 'INR', supplier_id: '' }))
+    await loadFormSuppliers(eid)
   }
 
   async function loadApprovalHistory(poId: string) {
@@ -125,22 +146,24 @@ export default function RequestsPage() {
   }
 
   async function handleSubmit() {
-    if (!form.title || !form.amount || !form.department || !entityId || !user) return
+    const submitEntityId = formEntityId || entityId
+    if (!form.title || !form.amount || !form.department || !submitEntityId || !user) return
     setSaving(true)
 
     try {
       const amount = parseFloat(form.amount)
-      const poNumber = `${entityCode}-${Date.now().toString().slice(-6)}`
+      const co = COMPANIES[submitEntityId]
+      const code = co?.code || entityCode || 'PO'
+      const poNumber = `${code}-${Date.now().toString().slice(-6)}`
 
       // 1. Determine required approval levels BEFORE inserting
-      const requiredLevels = await getRequiredLevels(entityId, amount)
+      const requiredLevels = await getRequiredLevels(submitEntityId, amount)
 
       // 2. Insert the PO with required_levels stored
-      // status uses po_status enum: draft, pending_l1, pending_l2, pending_l3, pending_finance, approved, rejected
       const { data: po, error: poError } = await supabase
         .from('purchase_orders')
         .insert({
-          company_id: entityId,
+          company_id: submitEntityId,
           po_number: poNumber,
           title: form.title,
           description: form.description || null,
@@ -164,13 +187,13 @@ export default function RequestsPage() {
 
       // 3. Create approval_requests for the FIRST level only
       const firstLevel = requiredLevels[0]
-      const approvers = await getApproversForLevel(entityId, firstLevel)
+      const approvers = await getApproversForLevel(submitEntityId, firstLevel)
 
       if (approvers.length > 0) {
         const approvalRows = approvers.map((approverId: string) => ({
           document_id: po.id,
           document_type: 'purchase_order',
-          entity_id: entityId,
+          entity_id: submitEntityId,
           submitted_by: approverId,
           status: 'submitted',
           level: firstLevel,
@@ -181,7 +204,8 @@ export default function RequestsPage() {
 
       setShowForm(false)
       setForm(f => ({ ...f, title:'', description:'', amount:'', supplier_id:'', justification:'', invoice_ref:'' }))
-      await loadAll(entityId)
+      // Reload the user's primary entity view
+      if (entityId) await loadAll(entityId)
 
       const chain = requiredLevels.join(' → ')
       alert(`Request submitted!\nApproval chain: ${chain}\n\nSent to ${firstLevel} approver${approvers.length !== 1 ? 's' : ''} for review.`)
@@ -389,6 +413,15 @@ export default function RequestsPage() {
 
             <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
               <div>
+                <label style={lbl}>Entity (Legal Entity) *</label>
+                <select style={inp} value={formEntityId || ''} onChange={e => handleFormEntityChange(e.target.value)}>
+                  {Object.entries(COMPANIES).map(([id, co]) => (
+                    <option key={id} value={id}>{co.name} ({co.code})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
                 <label style={lbl}>Request Title *</label>
                 <input style={inp} value={form.title} onChange={e => setForm({...form, title:e.target.value})} placeholder="e.g. AWS Cloud Services Q2"/>
               </div>
@@ -424,10 +457,10 @@ export default function RequestsPage() {
                 </select>
               </div>
               <div>
-                <label style={lbl}>Supplier {suppliers.length === 0 ? '(no approved suppliers yet)' : '(optional)'}</label>
+                <label style={lbl}>Supplier {formSuppliers.length === 0 ? '(no approved suppliers for this entity)' : '(optional)'}</label>
                 <select style={inp} value={form.supplier_id} onChange={e => setForm({...form, supplier_id:e.target.value})}>
                   <option value="">Select supplier...</option>
-                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  {formSuppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
               <div>
