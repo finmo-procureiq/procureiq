@@ -22,21 +22,23 @@ export default function Sidebar() {
       const { data: profile } = await supabase
         .from('user_profiles').select('full_name, email').eq('id', user.id).single()
       setUserProfile(profile)
-      const { data: memberships } = await supabase
-        .from('company_members')
-        .select('company_id, role:roles(code), company:companies(id, name, code, country, currency)')
-        .eq('user_id', user.id).eq('is_active', true)
-      if (memberships?.length) {
-        const cos = memberships.map((m: any) => m.company).filter(Boolean)
-        // Deduplicate companies
-        const uniqueCos = cos.filter((c: any, i: number) => cos.findIndex((x: any) => x.id === c.id) === i)
+      // Fetch companies via API (bypasses RLS on companies table)
+      const [cosRes, memberships] = await Promise.all([
+        fetch('/api/companies').then(r => r.json()),
+        supabase.from('company_members')
+          .select('company_id, role:roles(code)')
+          .eq('user_id', user.id).eq('is_active', true)
+          .then(r => r.data)
+      ])
+      const uniqueCos = Array.isArray(cosRes) ? cosRes : []
+      if (uniqueCos.length) {
         setCompanies(uniqueCos)
         const saved = localStorage.getItem('activeCompanyId')
         const active = uniqueCos.find((c: any) => c.id === saved) || uniqueCos[0]
         setActiveCompany(active)
         if (!saved && active) localStorage.setItem('activeCompanyId', active.id)
-        // Find role for active company — fall back to first membership
-        const activeMembership = memberships.find((m: any) => m.company_id === active?.id) || memberships[0]
+        // Find role for active company
+        const activeMembership = (memberships || []).find((m: any) => m.company_id === active?.id) || (memberships || [])[0]
         const role = (activeMembership as any)?.role?.code || ''
         console.log('User role detected:', role)
         setUserRole(role)
