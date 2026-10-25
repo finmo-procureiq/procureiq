@@ -198,7 +198,7 @@ export default function RequestsPage() {
           level: firstLevel,
         }))
         const { error: arErr } = await supabase.from('approval_requests').insert(approvalRows)
-        if (arErr) console.warn('approval_requests insert error:', arErr.message)
+        if (arErr) throw new Error('approval_requests insert failed: ' + arErr.message + ' | code: ' + arErr.code + ' | details: ' + arErr.details)
       }
 
       setShowForm(false)
