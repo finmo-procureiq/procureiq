@@ -23,7 +23,7 @@ export default function AnalyticsPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     const { data: members } = await supabase
-      .from('company_members').select('company_id').eq('user_id', user.id).eq('is_active', true).limit(1)
+      .from('company_members').select('company_id').eq('user_id', user.id).eq('is_active', true)
     const cid = members?.[0]?.company_id || ''
     setCompanyId(cid)
     if (cid) {
