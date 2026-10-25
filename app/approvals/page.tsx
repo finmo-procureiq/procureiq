@@ -73,7 +73,7 @@ export default function ApprovalsPage() {
       `)
       .eq('submitted_by', userId)
       .eq('document_type', 'purchase_order')
-      .eq('status', 'submitted')
+      .in('status', ['submitted', 'pending'])
       .order('created_at', { ascending: false })
 
     setRequests(pending || [])
@@ -177,7 +177,7 @@ export default function ApprovalsPage() {
               .eq('is_active', true)
 
             const financeUsers = (financeMembers || [])
-              .filter((m: any) => Array.isArray(m.roles) && m.roles.includes('FINANCE'))
+              .filter((m: any) => Array.isArray(m.roles) && (m.roles.includes('FINANCE') || m.roles.includes('ADMIN')))
               .map((m: any) => m.user_id)
 
             if (financeUsers.length > 0) {
@@ -210,7 +210,7 @@ export default function ApprovalsPage() {
               .eq('is_active', true)
 
             const nextApprovers = (nextMembers || [])
-              .filter((m: any) => Array.isArray(m.roles) && m.roles.includes(nextLevel))
+              .filter((m: any) => Array.isArray(m.roles) && (m.roles.includes(nextLevel) || m.roles.includes('ADMIN')))
               .map((m: any) => m.user_id)
 
             if (nextApprovers.length > 0) {
