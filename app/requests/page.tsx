@@ -3,6 +3,15 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/browser'
 
 const DEPARTMENTS = ['IT','Finance','HR','GatewayOps','Compliance','FinOps','RevOps','Customer Success','Legal','Marketing','Sales','Admin']
+const CURRENCIES = ['INR','SGD','AED','USD','EUR','GBP','MYR','HKD']
+
+const COMPANIES: Record<string, { code: string; currency: string; name: string }> = {
+  '33a0603c-5b4e-4418-9683-1a5d544560ea': { code: 'ACIN', currency: 'INR', name: 'Acme India Pvt Ltd' },
+  'f1d448b1-bc01-4f86-b3fc-6bc0b31c992e': { code: 'ACSG', currency: 'SGD', name: 'Acme Singapore Pte Ltd' },
+  '485d369d-087f-4776-a70b-6d1203e29c2d': { code: 'ACAE', currency: 'AED', name: 'Acme UAE LLC' },
+  '8d37db04-7eb7-4b76-afed-df2a50590d7f': { code: 'FTSG', currency: 'SGD', name: 'Finmo Tech Pte Ltd' },
+  'fcf15fb0-29e9-466d-aad2-5b0cf2089a0b': { code: 'FTIN', currency: 'INR', name: 'Finmo Tech India Pvt Ltd' },
+}
 
 export default function RequestsPage() {
   const [orders, setOrders] = useState<any[]>([])
@@ -13,15 +22,14 @@ export default function RequestsPage() {
   const [user, setUser] = useState<any>(null)
   const [entityId, setEntityId] = useState<string | null>(null)
   const [entityCode, setEntityCode] = useState<string>('')
-  const [currency, setCurrency] = useState<string>('INR')
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
+  const [approvalHistory, setApprovalHistory] = useState<any[]>([])
   const [form, setForm] = useState({
-    title: '', description: '', amount: '', supplier_id: '', department: '',
-    justification: '', invoice_ref: ''
+    title: '', description: '', amount: '', currency: 'INR',
+    supplier_id: '', department: '', justification: '', invoice_ref: ''
   })
 
   const supabase = createClient()
-
   useEffect(() => { init() }, [])
 
   async function init() {
@@ -30,57 +38,7 @@ export default function RequestsPage() {
       if (!u) return
       setUser(u)
 
-      // Try entity_members first
-      const { data: member, error: err1 } = await supabase
-        .from('entity_members')
-        .select('entity_id')
-        .eq('user_id', u.id)
-        .eq('is_active', true)
-        .limit(1)
-        .single()
-
-      if (!err1 && member?.entity_id) {
-        const eid = member.entity_id
-        setEntityId(eid)
-        // Load entity info for code/currency
-        const { data: entity } = await supabase
-          .from('entities')
-          .select('code, currency')
-          .eq('id', eid)
-          .single()
-        setEntityCode(entity?.code || '')
-        setCurrency(entity?.currency || 'INR')
-        await loadAll(eid)
-        setLoading(false)
-        return
-      }
-
-      // Fallback: company_members with entity_id
-      const { data: member2, error: err2 } = await supabase
-        .from('company_members')
-        .select('entity_id')
-        .eq('user_id', u.id)
-        .eq('is_active', true)
-        .limit(1)
-        .single()
-
-      if (!err2 && member2?.entity_id) {
-        const eid = member2.entity_id
-        setEntityId(eid)
-        const { data: entity } = await supabase
-          .from('entities')
-          .select('code, currency')
-          .eq('id', eid)
-          .single()
-        setEntityCode(entity?.code || '')
-        setCurrency(entity?.currency || 'INR')
-        await loadAll(eid)
-        setLoading(false)
-        return
-      }
-
-      // Fallback: company_members with company_id
-      const { data: member3 } = await supabase
+      const { data: member } = await supabase
         .from('company_members')
         .select('company_id')
         .eq('user_id', u.id)
@@ -88,17 +46,13 @@ export default function RequestsPage() {
         .limit(1)
         .single()
 
-      if (member3?.company_id) {
-        const eid = member3.company_id
+      if (member?.company_id) {
+        const eid = member.company_id
         setEntityId(eid)
-        // Try companies table for code/currency
-        const { data: company } = await supabase
-          .from('companies')
-          .select('code, currency')
-          .eq('id', eid)
-          .single()
-        setEntityCode(company?.code || '')
-        setCurrency(company?.currency || 'INR')
+        const co = COMPANIES[eid]
+        setEntityCode(co?.code || 'PO')
+        // Default form currency to entity currency
+        setForm(f => ({ ...f, currency: co?.currency || 'INR' }))
         await loadAll(eid)
       }
     } catch (e) {
@@ -109,46 +63,65 @@ export default function RequestsPage() {
 
   async function loadAll(eid: string) {
     try {
-      // Load purchase orders — try entity_id first, fallback to company_id
-      const { data: ordersData, error: ordErr } = await supabase
+      const { data: ordersData } = await supabase
         .from('purchase_orders')
         .select('*, supplier:suppliers(id, name)')
-        .eq('entity_id', eid)
+        .eq('company_id', eid)
         .order('created_at', { ascending: false })
+      setOrders(ordersData || [])
 
-      if (!ordErr) {
-        setOrders(ordersData || [])
-      } else {
-        const { data: ordersData2 } = await supabase
-          .from('purchase_orders')
-          .select('*, supplier:suppliers(id, name)')
-          .eq('company_id', eid)
-          .order('created_at', { ascending: false })
-        setOrders(ordersData2 || [])
-      }
-
-      // Load approved suppliers — try entity_id first
-      const { data: suppData, error: suppErr } = await supabase
+      const { data: suppData } = await supabase
         .from('suppliers')
         .select('id, name')
-        .eq('entity_id', eid)
+        .eq('company_id', eid)
         .eq('status', 'approved')
         .order('name')
-
-      if (!suppErr) {
-        setSuppliers(suppData || [])
-      } else {
-        const { data: suppData2 } = await supabase
-          .from('suppliers')
-          .select('id, name')
-          .eq('company_id', eid)
-          .eq('status', 'approved')
-          .order('name')
-        setSuppliers(suppData2 || [])
-      }
+      setSuppliers(suppData || [])
     } catch (e) {
       console.error('loadAll error:', e)
     }
+  }
+
+  async function loadApprovalHistory(poId: string) {
+    const { data } = await supabase
+      .from('approval_requests')
+      .select(`
+        *,
+        approver:user_profiles(full_name, email)
+      `)
+      .eq('purchase_order_id', poId)
+      .order('created_at', { ascending: true })
+    setApprovalHistory(data || [])
+  }
+
+  async function getRequiredLevels(companyId: string, amount: number): Promise<string[]> {
+    const { data: matrix } = await supabase
+      .from('approval_matrix')
+      .select('min_amount, max_amount, required_levels')
+      .eq('company_id', companyId)
+      .eq('is_active', true)
+      .order('min_amount', { ascending: true })
+
+    if (!matrix?.length) return ['L1']
+
+    for (const row of matrix) {
+      const aboveMin = amount >= row.min_amount
+      const belowMax = row.max_amount === null || amount <= row.max_amount
+      if (aboveMin && belowMax) return row.required_levels
+    }
+    return ['L1']
+  }
+
+  async function getApproversForLevel(companyId: string, level: string): Promise<string[]> {
+    const { data: members } = await supabase
+      .from('company_members')
+      .select('user_id, roles')
+      .eq('company_id', companyId)
+      .eq('is_active', true)
+
+    return (members || [])
+      .filter((m: any) => Array.isArray(m.roles) && m.roles.includes(level))
+      .map((m: any) => m.user_id)
   }
 
   async function handleSubmit() {
@@ -156,32 +129,22 @@ export default function RequestsPage() {
     setSaving(true)
 
     try {
-      const poNumber = `${entityCode || 'PO'}-${Date.now().toString().slice(-6)}`
+      const amount = parseFloat(form.amount)
+      const poNumber = `${entityCode}-${Date.now().toString().slice(-6)}`
 
-      // Try inserting with entity_id first
-      const { error } = await supabase.from('purchase_orders').insert({
-        entity_id: entityId,
-        po_number: poNumber,
-        title: form.title,
-        description: form.description || null,
-        amount: parseFloat(form.amount),
-        supplier_id: form.supplier_id || null,
-        department: form.department,
-        justification: form.justification || null,
-        invoice_ref: form.invoice_ref || null,
-        requested_by: user.id,
-        status: 'pending_l1',
-        current_level: 1,
-      })
+      // 1. Determine required approval levels BEFORE inserting
+      const requiredLevels = await getRequiredLevels(entityId, amount)
 
-      if (error) {
-        // Fallback: try with company_id
-        const { error: error2 } = await supabase.from('purchase_orders').insert({
+      // 2. Insert the PO with required_levels stored
+      const { data: po, error: poError } = await supabase
+        .from('purchase_orders')
+        .insert({
           company_id: entityId,
           po_number: poNumber,
           title: form.title,
           description: form.description || null,
-          amount: parseFloat(form.amount),
+          amount,
+          currency: form.currency,
           supplier_id: form.supplier_id || null,
           department: form.department,
           justification: form.justification || null,
@@ -189,18 +152,34 @@ export default function RequestsPage() {
           requested_by: user.id,
           status: 'pending_l1',
           current_level: 1,
+          required_levels: requiredLevels,
         })
-        if (error2) {
-          alert('Error submitting request: ' + error2.message)
-          setSaving(false)
-          return
-        }
+        .select()
+        .single()
+
+      if (poError) throw poError
+
+      // 3. Create approval_requests for the FIRST level only
+      const firstLevel = requiredLevels[0]
+      const approvers = await getApproversForLevel(entityId, firstLevel)
+
+      if (approvers.length > 0) {
+        const approvalRows = approvers.map((approverId: string) => ({
+          purchase_order_id: po.id,
+          approver_id: approverId,
+          status: 'pending',
+          level: firstLevel,
+        }))
+        const { error: arErr } = await supabase.from('approval_requests').insert(approvalRows)
+        if (arErr) console.warn('approval_requests insert error:', arErr.message)
       }
 
       setShowForm(false)
-      setForm({ title:'', description:'', amount:'', supplier_id:'', department:'', justification:'', invoice_ref:'' })
+      setForm(f => ({ ...f, title:'', description:'', amount:'', supplier_id:'', justification:'', invoice_ref:'' }))
       await loadAll(entityId)
-      alert('Request submitted successfully!')
+
+      const chain = requiredLevels.join(' → ')
+      alert(`Request submitted!\nApproval chain: ${chain}\n\nSent to ${firstLevel} approver${approvers.length !== 1 ? 's' : ''} for review.`)
     } catch (e: any) {
       alert('Error submitting request: ' + e.message)
     }
@@ -208,19 +187,23 @@ export default function RequestsPage() {
   }
 
   const statusConfig: Record<string, { label: string; color: string; bg: string }> = {
-    pending_l1: { label: 'Pending L1', color: '#d97706', bg: '#fef3c7' },
-    pending_l2: { label: 'Pending L2', color: '#ea580c', bg: '#ffedd5' },
-    pending_l3: { label: 'Pending L3', color: '#9333ea', bg: '#f3e8ff' },
-    approved: { label: 'Approved', color: '#16a34a', bg: '#f0fdf4' },
-    rejected: { label: 'Rejected', color: '#dc2626', bg: '#fef2f2' },
-    recalled: { label: 'Recalled', color: '#6b7280', bg: '#f3f4f6' },
-    amended: { label: 'Amended', color: '#2563eb', bg: '#eff6ff' },
+    pending_l1:      { label: 'Pending L1',      color: '#d97706', bg: '#fef3c7' },
+    pending_l2:      { label: 'Pending L2',      color: '#ea580c', bg: '#ffedd5' },
+    pending_l3:      { label: 'Pending L3',      color: '#9333ea', bg: '#f3e8ff' },
+    pending_finance: { label: 'Pending Finance', color: '#0891b2', bg: '#ecfeff' },
+    approved:        { label: 'Approved',        color: '#16a34a', bg: '#f0fdf4' },
+    rejected:        { label: 'Rejected',        color: '#dc2626', bg: '#fef2f2' },
+    recalled:        { label: 'Recalled',        color: '#6b7280', bg: '#f3f4f6' },
   }
 
   const inp: React.CSSProperties = { width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:'8px', fontFamily:'sans-serif', fontSize:'13px', outline:'none', boxSizing:'border-box' }
   const lbl: React.CSSProperties = { display:'block', fontSize:'12px', fontWeight:'500', color:'#6b7280', marginBottom:'4px' }
 
-  const fmt = (n: number) => new Intl.NumberFormat('en-IN', { style:'currency', currency, maximumFractionDigits:0 }).format(n)
+  const fmtAmt = (amount: number, cur: string) => {
+    try {
+      return new Intl.NumberFormat('en-US', { style:'currency', currency: cur, maximumFractionDigits: 2 }).format(amount)
+    } catch { return `${cur} ${amount.toLocaleString()}` }
+  }
 
   if (loading) return <div style={{ padding:'48px', textAlign:'center', color:'#9ca3af', fontFamily:'sans-serif' }}>Loading requests...</div>
 
@@ -229,7 +212,7 @@ export default function RequestsPage() {
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'24px' }}>
         <div>
           <h1 style={{ fontSize:'24px', fontWeight:'600', marginBottom:'4px' }}>My Requests</h1>
-          <p style={{ color:'#666', fontSize:'14px', margin:0 }}>{orders.length} purchase requests</p>
+          <p style={{ color:'#666', fontSize:'14px', margin:0 }}>{orders.length} purchase request{orders.length !== 1 ? 's' : ''}</p>
         </div>
         <button onClick={() => setShowForm(true)}
           style={{ background:'#9B72F5', color:'#fff', border:'none', borderRadius:'8px', padding:'10px 18px', fontSize:'14px', fontWeight:'500', cursor:'pointer' }}>
@@ -261,14 +244,16 @@ export default function RequestsPage() {
               {orders.map(o => {
                 const sc = statusConfig[o.status] || { label: o.status, color:'#6b7280', bg:'#f3f4f6' }
                 return (
-                  <tr key={o.id} onClick={() => setSelectedOrder(o)} style={{ borderBottom:'1px solid #f3f4f6', cursor:'pointer' }}
+                  <tr key={o.id}
+                    onClick={async () => { setSelectedOrder(o); await loadApprovalHistory(o.id) }}
+                    style={{ borderBottom:'1px solid #f3f4f6', cursor:'pointer' }}
                     onMouseEnter={e => (e.currentTarget.style.background='#f9fafb')}
                     onMouseLeave={e => (e.currentTarget.style.background='')}>
                     <td style={{ padding:'12px 16px', fontFamily:'monospace', fontSize:'12px', color:'#6b7280' }}>{o.po_number}</td>
                     <td style={{ padding:'12px 16px', fontWeight:'500' }}>{o.title}</td>
                     <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{o.department || '—'}</td>
                     <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{o.supplier?.name || '—'}</td>
-                    <td style={{ padding:'12px 16px', fontWeight:'600', color:'#111827' }}>{fmt(o.amount)}</td>
+                    <td style={{ padding:'12px 16px', fontWeight:'600', color:'#111827' }}>{fmtAmt(o.amount, o.currency || 'INR')}</td>
                     <td style={{ padding:'12px 16px' }}>
                       <span style={{ padding:'3px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:'600', background:sc.bg, color:sc.color }}>{sc.label}</span>
                     </td>
@@ -281,25 +266,27 @@ export default function RequestsPage() {
         </div>
       )}
 
-      {/* Detail Modal */}
+      {/* Detail / History Modal */}
       {selectedOrder && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }}>
-          <div style={{ background:'#fff', borderRadius:'16px', width:'520px', maxWidth:'94vw', padding:'28px' }}>
+          <div style={{ background:'#fff', borderRadius:'16px', width:'580px', maxWidth:'94vw', padding:'28px', maxHeight:'90vh', overflowY:'auto' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px' }}>
               <div>
                 <div style={{ fontSize:'12px', color:'#9ca3af', fontFamily:'monospace', marginBottom:'4px' }}>{selectedOrder.po_number}</div>
                 <h2 style={{ fontSize:'18px', fontWeight:'600', margin:0 }}>{selectedOrder.title}</h2>
               </div>
-              <button onClick={() => setSelectedOrder(null)} style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#6b7280' }}>X</button>
+              <button onClick={() => { setSelectedOrder(null); setApprovalHistory([]) }}
+                style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#6b7280' }}>✕</button>
             </div>
+
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'16px' }}>
               {[
-                ['Amount', fmt(selectedOrder.amount)],
+                ['Amount', fmtAmt(selectedOrder.amount, selectedOrder.currency || 'INR')],
+                ['Currency', selectedOrder.currency || 'INR'],
                 ['Department', selectedOrder.department || '—'],
                 ['Supplier', selectedOrder.supplier?.name || '—'],
                 ['Status', (statusConfig[selectedOrder.status]||{label:selectedOrder.status}).label],
                 ['Invoice Ref', selectedOrder.invoice_ref || '—'],
-                ['Date', new Date(selectedOrder.created_at).toLocaleDateString('en-IN')],
               ].map(([k,v]) => (
                 <div key={k}>
                   <div style={{ fontSize:'11px', color:'#9ca3af', marginBottom:'2px' }}>{k}</div>
@@ -307,21 +294,77 @@ export default function RequestsPage() {
                 </div>
               ))}
             </div>
+
+            {/* Approval chain */}
+            {selectedOrder.required_levels?.length > 0 && (
+              <div style={{ marginBottom:'16px', padding:'12px', background:'#f8f9fa', borderRadius:'8px' }}>
+                <div style={{ fontSize:'11px', color:'#9ca3af', marginBottom:'8px', fontWeight:'600' }}>APPROVAL CHAIN</div>
+                <div style={{ display:'flex', gap:'6px', alignItems:'center', flexWrap:'wrap' }}>
+                  {selectedOrder.required_levels.map((lvl: string, i: number) => {
+                    const history = approvalHistory.filter(a => a.level === lvl)
+                    const anyApproved = history.some(a => a.status === 'approved')
+                    const anyRejected = history.some(a => a.status === 'rejected')
+                    const color = anyApproved ? '#16a34a' : anyRejected ? '#dc2626' : '#d97706'
+                    const bg = anyApproved ? '#f0fdf4' : anyRejected ? '#fef2f2' : '#fef3c7'
+                    return (
+                      <span key={lvl} style={{ display:'inline-flex', alignItems:'center', gap:'4px' }}>
+                        <span style={{ padding:'3px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:'600', background:bg, color }}>
+                          {anyApproved ? '✓ ' : anyRejected ? '✗ ' : ''}{lvl}
+                        </span>
+                        {i < selectedOrder.required_levels.length - 1 && <span style={{ color:'#9ca3af' }}>→</span>}
+                      </span>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {selectedOrder.description && (
-              <div style={{ padding:'12px', background:'#f9fafb', borderRadius:'8px', fontSize:'13px', color:'#6b7280', marginBottom:'16px' }}>
+              <div style={{ padding:'12px', background:'#f9fafb', borderRadius:'8px', fontSize:'13px', color:'#6b7280', marginBottom:'12px' }}>
                 {selectedOrder.description}
               </div>
             )}
             {selectedOrder.justification && (
-              <div>
-                <div style={{ fontSize:'11px', color:'#9ca3af', marginBottom:'4px' }}>Justification</div>
+              <div style={{ marginBottom:'12px' }}>
+                <div style={{ fontSize:'11px', color:'#9ca3af', marginBottom:'4px' }}>Business Justification</div>
                 <div style={{ padding:'12px', background:'#fffbeb', border:'1px solid #fde68a', borderRadius:'8px', fontSize:'13px', color:'#92400e' }}>
                   {selectedOrder.justification}
                 </div>
               </div>
             )}
+
+            {/* Approval history */}
+            {approvalHistory.length > 0 && (
+              <div>
+                <div style={{ fontSize:'11px', color:'#9ca3af', marginBottom:'8px', fontWeight:'600' }}>APPROVAL HISTORY</div>
+                <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
+                  {approvalHistory.map((a: any) => {
+                    const isApproved = a.status === 'approved'
+                    const isRejected = a.status === 'rejected'
+                    return (
+                      <div key={a.id} style={{
+                        display:'flex', alignItems:'flex-start', gap:'10px', padding:'10px 12px', borderRadius:'8px',
+                        background: isApproved ? '#f0fdf4' : isRejected ? '#fef2f2' : '#fef3c7',
+                        border: `1px solid ${isApproved ? '#bbf7d0' : isRejected ? '#fecaca' : '#fde68a'}`
+                      }}>
+                        <span style={{ fontSize:'16px' }}>{isApproved ? '✅' : isRejected ? '❌' : '⏳'}</span>
+                        <div style={{ flex:1 }}>
+                          <div style={{ fontSize:'13px', fontWeight:'500' }}>
+                            {a.approver?.full_name || a.approver?.email || 'Approver'} <span style={{ color:'#9ca3af', fontWeight:'400' }}>· {a.level}</span>
+                          </div>
+                          {a.notes && <div style={{ fontSize:'12px', color:'#6b7280', marginTop:'2px', fontStyle:'italic' }}>"{a.notes}"</div>}
+                          {a.responded_at && <div style={{ fontSize:'11px', color:'#9ca3af', marginTop:'2px' }}>{new Date(a.responded_at).toLocaleString('en-IN')}</div>}
+                        </div>
+                        <span style={{ fontSize:'12px', fontWeight:'600', color: isApproved ? '#16a34a' : isRejected ? '#dc2626' : '#d97706', textTransform:'capitalize' }}>{a.status}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             <div style={{ display:'flex', justifyContent:'flex-end', marginTop:'20px' }}>
-              <button onClick={() => setSelectedOrder(null)}
+              <button onClick={() => { setSelectedOrder(null); setApprovalHistory([]) }}
                 style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>
                 Close
               </button>
@@ -333,10 +376,10 @@ export default function RequestsPage() {
       {/* New Request Form */}
       {showForm && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }}>
-          <div style={{ background:'#fff', borderRadius:'16px', width:'560px', maxWidth:'94vw', padding:'28px', maxHeight:'90vh', overflowY:'auto' }}>
+          <div style={{ background:'#fff', borderRadius:'16px', width:'580px', maxWidth:'94vw', padding:'28px', maxHeight:'90vh', overflowY:'auto' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px' }}>
               <h2 style={{ fontSize:'18px', fontWeight:'600', margin:0 }}>New Purchase Request</h2>
-              <button onClick={() => setShowForm(false)} style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#6b7280' }}>X</button>
+              <button onClick={() => setShowForm(false)} style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#6b7280' }}>✕</button>
             </div>
 
             <div style={{ display:'flex', flexDirection:'column', gap:'14px' }}>
@@ -347,40 +390,50 @@ export default function RequestsPage() {
 
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'14px' }}>
                 <div>
-                  <label style={lbl}>Amount ({currency}) *</label>
+                  <label style={lbl}>Amount *</label>
                   <input style={inp} type="number" value={form.amount} onChange={e => setForm({...form, amount:e.target.value})} placeholder="0.00"/>
                 </div>
                 <div>
-                  <label style={lbl}>Department *</label>
-                  <select style={inp} value={form.department} onChange={e => setForm({...form, department:e.target.value})}>
-                    <option value="">Select department...</option>
-                    {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                  <label style={lbl}>Invoice Currency *</label>
+                  <select style={inp} value={form.currency} onChange={e => setForm({...form, currency:e.target.value})}>
+                    {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
               </div>
 
+              {/* Threshold hint */}
+              {form.amount && (
+                <div style={{ padding:'8px 12px', background:'#f0f9ff', border:'1px solid #bae6fd', borderRadius:'8px', fontSize:'12px', color:'#0369a1' }}>
+                  {parseFloat(form.amount) < 10000 ? '→ L1 approval only' :
+                   parseFloat(form.amount) < 25000 ? '→ L1 then L2 approval' :
+                   '→ L1 → L2 → L3 approval chain'}
+                  {' '}(based on {form.currency} amount)
+                </div>
+              )}
+
+              <div>
+                <label style={lbl}>Department *</label>
+                <select style={inp} value={form.department} onChange={e => setForm({...form, department:e.target.value})}>
+                  <option value="">Select department...</option>
+                  {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
               <div>
                 <label style={lbl}>Supplier {suppliers.length === 0 ? '(no approved suppliers yet)' : '(optional)'}</label>
                 <select style={inp} value={form.supplier_id} onChange={e => setForm({...form, supplier_id:e.target.value})}>
                   <option value="">Select supplier...</option>
                   {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
-                {suppliers.length === 0 && (
-                  <p style={{ fontSize:'11px', color:'#f59e0b', marginTop:'4px' }}>No approved suppliers found. Go to Suppliers page to add and approve suppliers first.</p>
-                )}
               </div>
-
               <div>
                 <label style={lbl}>Invoice / Reference Number</label>
                 <input style={inp} value={form.invoice_ref} onChange={e => setForm({...form, invoice_ref:e.target.value})} placeholder="INV-2024-001"/>
               </div>
-
               <div>
                 <label style={lbl}>Description</label>
                 <textarea style={{...inp, height:'72px', resize:'vertical' as any}} value={form.description}
                   onChange={e => setForm({...form, description:e.target.value})} placeholder="What is this purchase for?"/>
               </div>
-
               <div>
                 <label style={lbl}>Business Justification</label>
                 <textarea style={{...inp, height:'72px', resize:'vertical' as any}} value={form.justification}
@@ -395,7 +448,8 @@ export default function RequestsPage() {
               </button>
               <button onClick={handleSubmit} disabled={saving || !form.title || !form.amount || !form.department}
                 style={{ padding:'9px 18px', border:'none', borderRadius:'8px', fontSize:'14px', fontWeight:'500', cursor:'pointer', color:'#fff',
-                  background: (!form.title||!form.amount||!form.department) ? '#c4b5fd' : '#9B72F5' }}>
+                  background: (!form.title||!form.amount||!form.department) ? '#c4b5fd' : '#9B72F5',
+                  opacity: saving ? 0.7 : 1 }}>
                 {saving ? 'Submitting...' : 'Submit Request'}
               </button>
             </div>
