@@ -130,6 +130,7 @@ export default function Sidebar() {
         {(showAll || isAdmin) && <NavLink href="/admin/matrix" label="Approval Matrix" pathname={pathname} />}
         {(showAll || isAdmin) && <NavLink href="/admin/entities" label="Manage Entities" pathname={pathname} />}
         {(showAll || isAdmin) && <NavLink href="/admin/departments" label="Manage Departments" pathname={pathname} />}
+        {(showAll || isAdmin) && <NavLink href="/admin/delegation" label="Approver Delegation" pathname={pathname} />}
       </nav>
 
       <div style={{ padding:'14px 20px', borderTop:'1px solid rgba(255,255,255,0.08)', background:'rgba(0,0,0,0.1)' }}>

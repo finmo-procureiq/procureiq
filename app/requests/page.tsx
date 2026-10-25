@@ -22,6 +22,7 @@ export default function RequestsPage() {
   const [attachments, setAttachments] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
   const [approvalHistory, setApprovalHistory] = useState<any[]>([])
+  const [poAttachments, setPoAttachments] = useState<{ name: string; url: string }[]>([])
   const [actioning, setActioning] = useState(false)
   const [editMode, setEditMode] = useState(false)
   const [editForm, setEditForm] = useState<any>(null)
@@ -147,6 +148,25 @@ export default function RequestsPage() {
       .eq('purchase_order_id', poId)
       .order('created_at', { ascending: true })
     setApprovalHistory(data || [])
+  }
+
+  async function loadAttachments(poId: string) {
+    try {
+      const { data, error } = await supabase.storage
+        .from('attachments')
+        .list(`purchase_orders/${poId}`, { limit: 50 })
+      if (error || !data) { setPoAttachments([]); return }
+      const files = data.filter(f => f.name !== '.emptyFolderPlaceholder')
+      const withUrls = files.map(f => {
+        const { data: urlData } = supabase.storage
+          .from('attachments')
+          .getPublicUrl(`purchase_orders/${poId}/${f.name}`)
+        // Strip timestamp prefix for display
+        const displayName = f.name.replace(/^\d+_/, '')
+        return { name: displayName, url: urlData.publicUrl }
+      })
+      setPoAttachments(withUrls)
+    } catch { setPoAttachments([]) }
   }
 
   async function handleRecall(po: any) {
@@ -573,7 +593,7 @@ export default function RequestsPage() {
                 const sc = statusConfig[o.status] || { label: o.status, color:'#6b7280', bg:'#f3f4f6' }
                 return (
                   <tr key={o.id}
-                    onClick={async () => { setSelectedOrder(o); await loadApprovalHistory(o.id) }}
+                    onClick={async () => { setSelectedOrder(o); await loadApprovalHistory(o.id); await loadAttachments(o.id) }}
                     style={{ borderBottom:'1px solid #f3f4f6', cursor:'pointer' }}
                     onMouseEnter={e => (e.currentTarget.style.background='#f9fafb')}
                     onMouseLeave={e => (e.currentTarget.style.background='')}>
@@ -604,7 +624,7 @@ export default function RequestsPage() {
                 <div style={{ fontSize:'12px', color:'#9ca3af', fontFamily:'monospace', marginBottom:'4px' }}>{selectedOrder.po_number}</div>
                 <h2 style={{ fontSize:'18px', fontWeight:'600', margin:0 }}>{selectedOrder.title}</h2>
               </div>
-              <button onClick={() => { setSelectedOrder(null); setApprovalHistory([]) }}
+              <button onClick={() => { setSelectedOrder(null); setApprovalHistory([]); setPoAttachments([]) }}
                 style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#6b7280' }}>✕</button>
             </div>
 
@@ -745,6 +765,25 @@ export default function RequestsPage() {
               </div>
             </div>
 
+            {/* Attachments */}
+            {poAttachments.length > 0 && (
+              <div style={{ marginBottom:'16px' }}>
+                <div style={{ fontSize:'11px', color:'#9ca3af', marginBottom:'8px', fontWeight:'600', letterSpacing:'0.5px' }}>ATTACHMENTS</div>
+                <div style={{ display:'flex', flexDirection:'column', gap:'6px' }}>
+                  {poAttachments.map((att, i) => (
+                    <a key={i} href={att.url} target="_blank" rel="noopener noreferrer"
+                      style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 12px', background:'#f8fafc', border:'1px solid #e5e7eb', borderRadius:'8px', textDecoration:'none', color:'#374151', fontSize:'13px' }}
+                      onMouseEnter={e => (e.currentTarget.style.background='#f0f4ff')}
+                      onMouseLeave={e => (e.currentTarget.style.background='#f8fafc')}>
+                      <span style={{ fontSize:'16px' }}>📎</span>
+                      <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{att.name}</span>
+                      <span style={{ fontSize:'11px', color:'#9B72F5', fontWeight:'500', flexShrink:0 }}>↗ Open</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Edit mode */}
             {editMode && editForm && (
               <div style={{ marginTop:'16px', padding:'16px', background:'#f9fafb', borderRadius:'10px', border:'1px solid #e5e7eb' }}>
@@ -820,7 +859,7 @@ export default function RequestsPage() {
                   style={{ padding:'9px 16px', border:'1px solid #9B72F5', borderRadius:'8px', background:'#fff', color:'#9B72F5', fontSize:'14px', fontWeight:'500', cursor:'pointer' }}>
                   ⬇ PDF
                 </button>
-                <button onClick={() => { setSelectedOrder(null); setApprovalHistory([]); setEditMode(false); setEditForm(null) }}
+                <button onClick={() => { setSelectedOrder(null); setApprovalHistory([]); setPoAttachments([]); setEditMode(false); setEditForm(null) }}
                   style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>
                   Close
                 </button>
