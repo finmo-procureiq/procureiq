@@ -125,113 +125,104 @@ export default function ApprovalsPage() {
   }
 
   async function handleAction(approvalRequest: any, action: 'approve' | 'reject') {
-    if (!user || !entityId) return
+    if (!user) return
     setActing(true)
 
     try {
       const now = new Date().toISOString()
       const po = approvalRequest.purchase_order
+      const poCompanyId = po.company_id
 
-      // 1. Update this approval_request
+      // 1. Mark ALL submitted rows at this level as approved/rejected (clears stale duplicates too)
       const updateData: any = {
         status: action === 'approve' ? 'approved' : 'rejected',
         notes: notes || null,
         responded_at: now,
-      }
-      if (action === 'approve') {
-        updateData.approved_by = user.id
-        updateData.approved_at = now
-      } else {
-        updateData.rejected_by = user.id
-        updateData.rejected_at = now
-        updateData.reject_reason = notes || null
+        approved_by: action === 'approve' ? user.id : null,
+        approved_at: action === 'approve' ? now : null,
+        rejected_by: action === 'reject' ? user.id : null,
+        rejected_at: action === 'reject' ? now : null,
+        reject_reason: action === 'reject' ? (notes || null) : null,
       }
 
-      const { error: arErr } = await supabase
+      await supabase
         .from('approval_requests')
         .update(updateData)
-        .eq('id', approvalRequest.id)
-
-      if (arErr) throw arErr
+        .eq('document_id', po.id)
+        .eq('document_type', 'purchase_order')
+        .eq('level', approvalRequest.level)
+        .eq('status', 'submitted')
 
       if (action === 'reject') {
+        // Reject the PO entirely
         await supabase.from('purchase_orders').update({ status: 'rejected' }).eq('id', po.id)
       } else {
-        // Check if other approvers at same level still pending
-        const { data: otherPending } = await supabase
-          .from('approval_requests')
-          .select('id')
-          .eq('document_id', po.id)
-          .eq('document_type', 'purchase_order')
-          .eq('level', approvalRequest.level)
-          .eq('status', 'submitted')
+        // Advance to next level
+        const requiredLevels: string[] = po.required_levels || [approvalRequest.level]
+        const currentLevelIndex = requiredLevels.indexOf(approvalRequest.level)
+        const nextLevelIndex = currentLevelIndex + 1
 
-        if (!otherPending || otherPending.length === 0) {
-          // All at this level approved — advance
-          const requiredLevels: string[] = po.required_levels || [approvalRequest.level]
-          const currentLevelIndex = requiredLevels.indexOf(approvalRequest.level)
-          const nextLevelIndex = currentLevelIndex + 1
+        if (nextLevelIndex >= requiredLevels.length) {
+          // All approval levels done — move to Finance
+          await supabase.from('purchase_orders').update({
+            status: 'pending_finance',
+            current_level: String(nextLevelIndex + 1),
+          }).eq('id', po.id)
 
-          if (nextLevelIndex >= requiredLevels.length) {
-            // Done with all approval levels — move to Finance
-            await supabase.from('purchase_orders').update({
-              status: 'pending_finance',
-              current_level: String(nextLevelIndex + 1),
-            }).eq('id', po.id)
+          const { data: financeMembers } = await supabase
+            .from('company_members')
+            .select('user_id, roles')
+            .eq('company_id', poCompanyId)
+            .eq('is_active', true)
 
-            const { data: financeMembers } = await supabase
-              .from('company_members')
-              .select('user_id, roles')
-              .eq('company_id', entityId)
-              .eq('is_active', true)
+          const financeUsers = (financeMembers || [])
+            .filter((m: any) => Array.isArray(m.roles) && (m.roles.includes('FINANCE') || m.roles.includes('ADMIN')))
+            .map((m: any) => m.user_id)
 
-            const financeUsers = (financeMembers || [])
-              .filter((m: any) => Array.isArray(m.roles) && (m.roles.includes('FINANCE') || m.roles.includes('ADMIN')))
-              .map((m: any) => m.user_id)
-
-            if (financeUsers.length > 0) {
-              await supabase.from('approval_requests').insert(
-                financeUsers.map((uid: string) => ({
-                  document_id: po.id,
-                  document_type: 'purchase_order',
-                  submitted_by: uid,
-                  status: 'submitted',
-                  level: 'FINANCE',
-                }))
-              )
-            } else {
-              await supabase.from('purchase_orders').update({ status: 'approved' }).eq('id', po.id)
-            }
+          if (financeUsers.length > 0) {
+            await supabase.from('approval_requests').insert(
+              financeUsers.map((uid: string) => ({
+                document_id: po.id,
+                document_type: 'purchase_order',
+                submitted_by: uid,
+                status: 'submitted',
+                level: 'FINANCE',
+              }))
+            )
           } else {
-            const nextLevel = requiredLevels[nextLevelIndex]
-            const nextStatus = `pending_${nextLevel.toLowerCase()}`
+            // No finance approvers — auto-approve
+            await supabase.from('purchase_orders').update({ status: 'approved' }).eq('id', po.id)
+          }
+        } else {
+          // Move to next approval level
+          const nextLevel = requiredLevels[nextLevelIndex]
+          const nextStatus = `pending_${nextLevel.toLowerCase()}`
 
-            await supabase.from('purchase_orders').update({
-              status: nextStatus,
-              current_level: String(nextLevelIndex + 1),
-            }).eq('id', po.id)
+          await supabase.from('purchase_orders').update({
+            status: nextStatus,
+            current_level: String(nextLevelIndex + 1),
+          }).eq('id', po.id)
 
-            const { data: nextMembers } = await supabase
-              .from('company_members')
-              .select('user_id, roles')
-              .eq('company_id', entityId)
-              .eq('is_active', true)
+          const { data: nextMembers } = await supabase
+            .from('company_members')
+            .select('user_id, roles')
+            .eq('company_id', poCompanyId)
+            .eq('is_active', true)
 
-            const nextApprovers = (nextMembers || [])
-              .filter((m: any) => Array.isArray(m.roles) && (m.roles.includes(nextLevel) || m.roles.includes('ADMIN')))
-              .map((m: any) => m.user_id)
+          const nextApprovers = (nextMembers || [])
+            .filter((m: any) => Array.isArray(m.roles) && (m.roles.includes(nextLevel) || m.roles.includes('ADMIN')))
+            .map((m: any) => m.user_id)
 
-            if (nextApprovers.length > 0) {
-              await supabase.from('approval_requests').insert(
-                nextApprovers.map((uid: string) => ({
-                  document_id: po.id,
-                  document_type: 'purchase_order',
-                  submitted_by: uid,
-                  status: 'submitted',
-                  level: nextLevel,
-                }))
-              )
-            }
+          if (nextApprovers.length > 0) {
+            await supabase.from('approval_requests').insert(
+              nextApprovers.map((uid: string) => ({
+                document_id: po.id,
+                document_type: 'purchase_order',
+                submitted_by: uid,
+                status: 'submitted',
+                level: nextLevel,
+              }))
+            )
           }
         }
       }
@@ -240,7 +231,7 @@ export default function ApprovalsPage() {
       setNotes('')
       setSameLevel([])
       setAllHistory([])
-      await loadAll(user.id, entityId)
+      await loadAll(user.id, entityId || poCompanyId)
     } catch (e: any) {
       alert('Error: ' + e.message)
     }
