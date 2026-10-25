@@ -101,26 +101,6 @@ export default function Sidebar() {
         <div style={{ fontSize:'10px', color:'rgba(255,255,255,0.4)', textTransform:'uppercase', letterSpacing:'1.5px', marginTop:'3px' }}>Enterprise</div>
       </div>
 
-      {companies.length > 0 && (
-        <div style={{ padding:'12px 16px', borderBottom:'1px solid rgba(255,255,255,0.08)', background:'rgba(0,0,0,0.15)' }}>
-          <div style={{ fontSize:'9px', color:'rgba(255,255,255,0.35)', textTransform:'uppercase', letterSpacing:'1px', marginBottom:'6px' }}>Active Entity</div>
-          <select value={activeCompany?.id || ''} onChange={e => switchCompany(e.target.value)}
-            style={{ width:'100%', background:'rgba(255,255,255,0.1)', border:'1px solid rgba(196,176,240,0.3)', borderRadius:'8px', color:'#fff', padding:'7px 10px', fontSize:'12px', fontFamily:'sans-serif', cursor:'pointer', outline:'none', appearance:'auto' }}>
-            {companies.map(c => (
-              <option key={c.id} value={c.id} style={{ background:'#3C2B5A', color:'#fff' }}>
-                {c.name} ({c.currency})
-              </option>
-            ))}
-          </select>
-          {activeCompany && (
-            <div style={{ marginTop:'6px', display:'flex', gap:'5px' }}>
-              <span style={{ fontSize:'10px', background:'rgba(155,114,245,0.25)', color:'#C4B0F0', padding:'2px 7px', borderRadius:'20px', fontWeight:'600' }}>
-                {activeCompany.code}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
 
       <nav style={{ flex:1, padding:'8px 0', overflowY:'auto' }}>
         <NavLink href="/dashboard" label="Dashboard" pathname={pathname} />

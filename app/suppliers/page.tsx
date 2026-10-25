@@ -99,6 +99,46 @@ export default function SuppliersPage() {
     URL.revokeObjectURL(url)
   }
 
+  function downloadPDF() {
+    const w = window.open('', '_blank')
+    if (!w) return
+    const entityLabel = entityFilter === 'all' ? 'All Entities' : (companies.find(c => c.id === entityFilter)?.name || '')
+    const tableRows = filtered.map(s => {
+      const co = companies.find(c => c.id === s.company_id)
+      const statusColors: Record<string,string> = { approved:'#16a34a', pending:'#f59e0b', rejected:'#dc2626', blacklisted:'#6b7280' }
+      return `<tr>
+        <td>${s.name}</td>
+        <td>${co?.code || ''}</td>
+        <td>${s.category || '—'}</td>
+        <td style="color:${statusColors[s.status]||'#6b7280'};font-weight:600">${s.status}</td>
+        <td>${s.contact_email || '—'}</td>
+        <td>${s.gstin || '—'}</td>
+        <td>${s.bank_name ? `${s.bank_name}${s.bank_account ? ' · ' + s.bank_account : ''}` : '—'}</td>
+        <td>Net ${s.payment_terms} days</td>
+      </tr>`
+    }).join('')
+    w.document.write(`<!DOCTYPE html><html><head><title>Suppliers</title>
+    <style>
+      body{font-family:sans-serif;padding:32px;font-size:12px;color:#1c1917}
+      h1{font-size:20px;margin-bottom:4px}
+      .sub{color:#6b7280;font-size:12px;margin-bottom:24px}
+      table{width:100%;border-collapse:collapse}
+      th{background:#f9fafb;padding:8px 10px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.4px;border-bottom:2px solid #e5e7eb;color:#6b7280}
+      td{padding:8px 10px;border-bottom:1px solid #f3f4f6;font-size:11px}
+      .footer{margin-top:24px;font-size:10px;color:#9ca3af;border-top:1px solid #e5e7eb;padding-top:12px}
+    </style></head><body>
+    <h1>ProcureIQ — Supplier List</h1>
+    <div class="sub">${entityLabel} · ${filtered.length} suppliers · Generated ${new Date().toLocaleString()}</div>
+    <table>
+      <thead><tr><th>Name</th><th>Entity</th><th>Category</th><th>Status</th><th>Email</th><th>GSTIN</th><th>Bank</th><th>Terms</th></tr></thead>
+      <tbody>${tableRows}</tbody>
+    </table>
+    <div class="footer">ProcureIQ Enterprise · Confidential</div>
+    <script>window.onload=function(){window.print()}</script>
+    </body></html>`)
+    w.document.close()
+  }
+
   const statusColor: Record<string,string> = {
     approved: '#16a34a', pending: '#f59e0b', rejected: '#dc2626', blacklisted: '#6b7280'
   }
@@ -129,7 +169,11 @@ export default function SuppliersPage() {
         <div style={{ display:'flex', gap:'8px' }}>
           <button onClick={downloadCSV}
             style={{ padding:'9px 16px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', fontWeight:'500', cursor:'pointer', color:'#374151' }}>
-            ⬇ Download
+            ⬇ CSV
+          </button>
+          <button onClick={downloadPDF}
+            style={{ padding:'9px 16px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', fontWeight:'500', cursor:'pointer', color:'#374151' }}>
+            ⬇ PDF
           </button>
           <button onClick={() => setShowForm(true)}
             style={{ background:'#9B72F5', color:'#fff', border:'none', borderRadius:'8px', padding:'10px 18px', fontSize:'14px', fontWeight:'500', cursor:'pointer' }}>

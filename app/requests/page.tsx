@@ -27,6 +27,9 @@ export default function RequestsPage() {
   const [editForm, setEditForm] = useState<any>(null)
   const [supplierSearch, setSupplierSearch] = useState('')
   const [supplierDropOpen, setSupplierDropOpen] = useState(false)
+  const [showSupplierModal, setShowSupplierModal] = useState(false)
+  const [supplierForm, setSupplierForm] = useState({ name:'', contact_email:'', category:'', status:'approved' })
+  const [savingSupplier, setSavingSupplier] = useState(false)
   const [form, setForm] = useState({
     title: '', description: '', amount: '', currency: 'INR',
     supplier_id: '', department: '', justification: '', invoice_ref: ''
@@ -105,6 +108,26 @@ export default function RequestsPage() {
       .eq('status', 'approved')
       .order('name')
     setFormSuppliers(data || [])
+  }
+
+  async function createSupplierInline() {
+    if (!supplierForm.name || !formEntityId) return
+    setSavingSupplier(true)
+    const { data, error } = await supabase.from('suppliers').insert({
+      company_id: formEntityId,
+      name: supplierForm.name,
+      contact_email: supplierForm.contact_email || null,
+      category: supplierForm.category || null,
+      status: supplierForm.status,
+      payment_terms: 30,
+    }).select('id, name').single()
+    if (error) { alert('Error: ' + error.message); setSavingSupplier(false); return }
+    await loadFormSuppliers(formEntityId)
+    setForm(f => ({ ...f, supplier_id: data.id }))
+    setSupplierSearch('')
+    setShowSupplierModal(false)
+    setSupplierForm({ name:'', contact_email:'', category:'', status:'approved' })
+    setSavingSupplier(false)
   }
 
   async function handleFormEntityChange(eid: string) {
@@ -833,9 +856,9 @@ export default function RequestsPage() {
                         </div>
                       ))}
                     <div
-                      onMouseDown={() => { window.open('/suppliers', '_blank'); setSupplierDropOpen(false) }}
+                      onMouseDown={() => { setShowSupplierModal(true); setSupplierDropOpen(false) }}
                       style={{ padding:'10px 12px', cursor:'pointer', fontSize:'13px', color:'#9B72F5', fontWeight:'500', borderTop:'1px solid #e5e7eb', display:'flex', alignItems:'center', gap:'6px' }}>
-                      + Create new supplier →
+                      + Create new supplier
                     </div>
                   </div>
                 )}
@@ -884,6 +907,57 @@ export default function RequestsPage() {
                   background: (!form.title||!form.amount||!form.department) ? '#c4b5fd' : '#9B72F5',
                   opacity: saving ? 0.7 : 1 }}>
                 {saving ? 'Submitting...' : 'Submit Request'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Inline Create Supplier Modal */}
+      {showSupplierModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1100 }}>
+          <div style={{ background:'#fff', borderRadius:'16px', width:'480px', maxWidth:'94vw', padding:'28px' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px' }}>
+              <h2 style={{ fontSize:'18px', fontWeight:'600', margin:0 }}>Add New Supplier</h2>
+              <button onClick={() => setShowSupplierModal(false)} style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#6b7280' }}>✕</button>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+              <div>
+                <label style={{ display:'block', fontSize:'12px', fontWeight:'500', color:'#6b7280', marginBottom:'4px' }}>Supplier Name *</label>
+                <input style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:'8px', fontSize:'13px', outline:'none', boxSizing:'border-box' as any }}
+                  value={supplierForm.name} onChange={e => setSupplierForm({...supplierForm, name:e.target.value})} placeholder="Company name" autoFocus/>
+              </div>
+              <div>
+                <label style={{ display:'block', fontSize:'12px', fontWeight:'500', color:'#6b7280', marginBottom:'4px' }}>Category</label>
+                <input style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:'8px', fontSize:'13px', outline:'none', boxSizing:'border-box' as any }}
+                  value={supplierForm.category} onChange={e => setSupplierForm({...supplierForm, category:e.target.value})} placeholder="e.g. IT Services, Logistics"/>
+              </div>
+              <div>
+                <label style={{ display:'block', fontSize:'12px', fontWeight:'500', color:'#6b7280', marginBottom:'4px' }}>Contact Email</label>
+                <input style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:'8px', fontSize:'13px', outline:'none', boxSizing:'border-box' as any }}
+                  type="email" value={supplierForm.contact_email} onChange={e => setSupplierForm({...supplierForm, contact_email:e.target.value})} placeholder="supplier@company.com"/>
+              </div>
+              <div>
+                <label style={{ display:'block', fontSize:'12px', fontWeight:'500', color:'#6b7280', marginBottom:'4px' }}>Status</label>
+                <select style={{ width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:'8px', fontSize:'13px', outline:'none', boxSizing:'border-box' as any }}
+                  value={supplierForm.status} onChange={e => setSupplierForm({...supplierForm, status:e.target.value})}>
+                  <option value="approved">Approved</option>
+                  <option value="pending">Pending Review</option>
+                </select>
+              </div>
+            </div>
+            <p style={{ fontSize:'12px', color:'#9ca3af', marginTop:'12px', marginBottom:'0' }}>
+              Supplier will be added to <strong>{formEntityId ? (companiesMap[formEntityId]?.name || 'selected entity') : 'selected entity'}</strong>. You can add full bank details from the Suppliers page.
+            </p>
+            <div style={{ display:'flex', gap:'10px', marginTop:'20px', justifyContent:'flex-end' }}>
+              <button onClick={() => setShowSupplierModal(false)}
+                style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>
+                Cancel
+              </button>
+              <button onClick={createSupplierInline} disabled={savingSupplier || !supplierForm.name}
+                style={{ padding:'9px 18px', border:'none', borderRadius:'8px', fontSize:'14px', fontWeight:'500', cursor:'pointer', color:'#fff',
+                  background: !supplierForm.name ? '#c4b5fd' : '#9B72F5', opacity: savingSupplier ? 0.7 : 1 }}>
+                {savingSupplier ? 'Saving...' : 'Save & Select'}
               </button>
             </div>
           </div>
