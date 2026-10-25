@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/browser'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import GlobalSearch from './GlobalSearch'
+import NotificationBell from './NotificationBell'
 
 export default function Sidebar() {
   const [companies, setCompanies] = useState<any[]>([])
@@ -103,9 +104,10 @@ export default function Sidebar() {
       </div>
 
 
-      {/* Global search */}
-      <div style={{ padding:'8px 12px', borderBottom:'1px solid rgba(255,255,255,0.08)' }}>
-        <GlobalSearch />
+      {/* Global search + bell */}
+      <div style={{ padding:'8px 12px', borderBottom:'1px solid rgba(255,255,255,0.08)', display:'flex', alignItems:'center', gap:'4px' }}>
+        <div style={{ flex:1 }}><GlobalSearch /></div>
+        <NotificationBell />
       </div>
 
       <nav style={{ flex:1, padding:'8px 0', overflowY:'auto' }}>

@@ -23,6 +23,9 @@ export default function RequestsPage() {
   const [uploading, setUploading] = useState(false)
   const [approvalHistory, setApprovalHistory] = useState<any[]>([])
   const [poAttachments, setPoAttachments] = useState<{ name: string; url: string }[]>([])
+  const [poComments, setPoComments] = useState<any[]>([])
+  const [commentText, setCommentText] = useState('')
+  const [postingComment, setPostingComment] = useState(false)
   const [actioning, setActioning] = useState(false)
   const [editMode, setEditMode] = useState(false)
   const [editForm, setEditForm] = useState<any>(null)
@@ -167,6 +170,38 @@ export default function RequestsPage() {
       })
       setPoAttachments(withUrls)
     } catch { setPoAttachments([]) }
+  }
+
+  async function loadComments(poId: string) {
+    try {
+      const { data } = await supabase
+        .from('po_comments')
+        .select('*')
+        .eq('po_id', poId)
+        .order('created_at', { ascending: true })
+      setPoComments(data || [])
+    } catch { setPoComments([]) }
+  }
+
+  async function postComment(poId: string) {
+    if (!commentText.trim() || !user) return
+    setPostingComment(true)
+    try {
+      const { data: profile } = await supabase
+        .from('user_profiles').select('full_name, email').eq('id', user.id).single()
+      const companyId = companies.find((c: any) => c.id === selectedOrder?.company_id)?.id || companies[0]?.id
+      await supabase.from('po_comments').insert({
+        po_id: poId,
+        company_id: companyId,
+        user_id: user.id,
+        user_name: (profile as any)?.full_name || (profile as any)?.email || 'Unknown',
+        user_email: (profile as any)?.email || '',
+        message: commentText.trim(),
+      })
+      setCommentText('')
+      await loadComments(poId)
+    } catch(e: any) { console.error('Comment error:', e) }
+    setPostingComment(false)
   }
 
   async function handleRecall(po: any) {
@@ -583,7 +618,7 @@ export default function RequestsPage() {
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'14px' }}>
             <thead style={{ background:'#f9fafb' }}>
               <tr>
-                {['PO Number','Title','Entity','Department','Supplier','Amount','Status','Date'].map(h => (
+                {['PO Number','Title','Entity','Department','Supplier','Amount','Approval Progress','Date'].map(h => (
                   <th key={h} style={{ padding:'12px 16px', textAlign:'left', fontSize:'12px', fontWeight:'600', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.4px', borderBottom:'1px solid #e5e7eb' }}>{h}</th>
                 ))}
               </tr>
@@ -593,7 +628,7 @@ export default function RequestsPage() {
                 const sc = statusConfig[o.status] || { label: o.status, color:'#6b7280', bg:'#f3f4f6' }
                 return (
                   <tr key={o.id}
-                    onClick={async () => { setSelectedOrder(o); await loadApprovalHistory(o.id); await loadAttachments(o.id) }}
+                    onClick={async () => { setSelectedOrder(o); await loadApprovalHistory(o.id); await loadAttachments(o.id); await loadComments(o.id) }}
                     style={{ borderBottom:'1px solid #f3f4f6', cursor:'pointer' }}
                     onMouseEnter={e => (e.currentTarget.style.background='#f9fafb')}
                     onMouseLeave={e => (e.currentTarget.style.background='')}>
@@ -604,7 +639,37 @@ export default function RequestsPage() {
                     <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{o.supplier?.name || '—'}</td>
                     <td style={{ padding:'12px 16px', fontWeight:'600', color:'#111827' }}>{fmtAmt(o.amount, o.currency || 'INR')}</td>
                     <td style={{ padding:'12px 16px' }}>
-                      <span style={{ padding:'3px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:'600', background:sc.bg, color:sc.color }}>{sc.label}</span>
+                      {/* Mini approval chain — show steps for POs in flight, otherwise status badge */}
+                      {o.required_levels?.length > 0 && !['draft','void','paid'].includes(o.status) ? (
+                        <div style={{ display:'flex', alignItems:'center', gap:'3px', flexWrap:'nowrap' }}>
+                          {/* Submitted dot */}
+                          <span title="Submitted" style={{ width:'8px', height:'8px', borderRadius:'50%', background:'#16a34a', display:'inline-block', flexShrink:0 }}/>
+                          {(o.required_levels as string[]).map((lvl: string, i: number) => {
+                            const lvlKey = lvl.toLowerCase()
+                            const isDone = o.status !== `pending_${lvlKey}` && o.status !== 'submitted' &&
+                              (o.required_levels.indexOf(lvl) < o.required_levels.indexOf(o.current_level || '') ||
+                               ['pending_finance','approved','rejected'].includes(o.status))
+                            const isCurrent = o.status === `pending_${lvlKey}` || (i === 0 && o.status === 'submitted')
+                            const isRejected = o.status === 'rejected'
+                            const dotColor = isRejected ? '#dc2626' : isDone ? '#16a34a' : isCurrent ? '#9B72F5' : '#d1d5db'
+                            return (
+                              <span key={lvl} style={{ display:'inline-flex', alignItems:'center', gap:'3px' }}>
+                                <span style={{ width:'1px', height:'6px', background:'#e5e7eb', display:'inline-block' }}/>
+                                <span title={lvl} style={{ width:'8px', height:'8px', borderRadius:'50%', background:dotColor, display:'inline-block', flexShrink:0 }}/>
+                                <span style={{ fontSize:'9px', color: isDone ? '#16a34a' : isCurrent ? '#9B72F5' : '#9ca3af', fontWeight:'600', letterSpacing:'0px' }}>{lvl.replace('L','L')}</span>
+                              </span>
+                            )
+                          })}
+                          {/* Finance dot */}
+                          <span style={{ display:'inline-flex', alignItems:'center', gap:'3px' }}>
+                            <span style={{ width:'1px', height:'6px', background:'#e5e7eb', display:'inline-block' }}/>
+                            <span title="Finance" style={{ width:'8px', height:'8px', borderRadius:'50%', background: o.status === 'approved' ? '#16a34a' : o.status === 'pending_finance' ? '#9B72F5' : '#d1d5db', display:'inline-block', flexShrink:0 }}/>
+                            <span style={{ fontSize:'9px', color: o.status === 'approved' ? '#16a34a' : o.status === 'pending_finance' ? '#9B72F5' : '#9ca3af', fontWeight:'600' }}>FIN</span>
+                          </span>
+                        </div>
+                      ) : (
+                        <span style={{ padding:'3px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:'600', background:sc.bg, color:sc.color }}>{sc.label}</span>
+                      )}
                     </td>
                     <td style={{ padding:'12px 16px', color:'#9ca3af', fontSize:'12px' }}>{new Date(o.created_at).toLocaleDateString('en-IN')}</td>
                   </tr>
@@ -624,7 +689,7 @@ export default function RequestsPage() {
                 <div style={{ fontSize:'12px', color:'#9ca3af', fontFamily:'monospace', marginBottom:'4px' }}>{selectedOrder.po_number}</div>
                 <h2 style={{ fontSize:'18px', fontWeight:'600', margin:0 }}>{selectedOrder.title}</h2>
               </div>
-              <button onClick={() => { setSelectedOrder(null); setApprovalHistory([]); setPoAttachments([]) }}
+              <button onClick={() => { setSelectedOrder(null); setApprovalHistory([]); setPoAttachments([]); setPoComments([]); setCommentText('') }}
                 style={{ background:'none', border:'none', fontSize:'20px', cursor:'pointer', color:'#6b7280' }}>✕</button>
             </div>
 
@@ -784,6 +849,53 @@ export default function RequestsPage() {
               </div>
             )}
 
+            {/* Comments thread */}
+            <div style={{ marginBottom:'16px' }}>
+              <div style={{ fontSize:'11px', color:'#9ca3af', marginBottom:'10px', fontWeight:'600', letterSpacing:'0.5px' }}>
+                COMMENTS {poComments.length > 0 && <span style={{ background:'#ede9fe', color:'#7c3aed', borderRadius:'20px', padding:'1px 6px', marginLeft:'4px' }}>{poComments.length}</span>}
+              </div>
+
+              {/* Thread */}
+              {poComments.length > 0 && (
+                <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginBottom:'10px', maxHeight:'200px', overflowY:'auto' }}>
+                  {poComments.map((c: any) => {
+                    const isMe = c.user_id === user?.id
+                    return (
+                      <div key={c.id} style={{ display:'flex', gap:'8px', alignItems:'flex-start', flexDirection: isMe ? 'row-reverse' : 'row' }}>
+                        <div style={{ width:'28px', height:'28px', borderRadius:'50%', background: isMe ? '#9B72F5' : '#e5e7eb', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'11px', fontWeight:'700', color: isMe ? '#fff' : '#6b7280', flexShrink:0 }}>
+                          {(c.user_name || '?')[0].toUpperCase()}
+                        </div>
+                        <div style={{ maxWidth:'75%' }}>
+                          <div style={{ fontSize:'10px', color:'#9ca3af', marginBottom:'3px', textAlign: isMe ? 'right' : 'left' }}>
+                            {isMe ? 'You' : c.user_name} · {new Date(c.created_at).toLocaleString('en-IN', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}
+                          </div>
+                          <div style={{ padding:'8px 12px', borderRadius: isMe ? '12px 4px 12px 12px' : '4px 12px 12px 12px', background: isMe ? '#ede9fe' : '#f3f4f6', fontSize:'13px', color:'#374151', lineHeight:'1.4' }}>
+                            {c.message}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Compose */}
+              <div style={{ display:'flex', gap:'8px', alignItems:'flex-end' }}>
+                <textarea
+                  value={commentText}
+                  onChange={e => setCommentText(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); postComment(selectedOrder.id) } }}
+                  placeholder="Add a comment… (Enter to send, Shift+Enter for new line)"
+                  rows={2}
+                  style={{ flex:1, padding:'8px 10px', border:'1px solid #d1d5db', borderRadius:'8px', fontSize:'13px', outline:'none', resize:'none', fontFamily:'sans-serif', lineHeight:'1.4' }}
+                />
+                <button onClick={() => postComment(selectedOrder.id)} disabled={postingComment || !commentText.trim()}
+                  style={{ padding:'8px 14px', border:'none', borderRadius:'8px', background: postingComment || !commentText.trim() ? '#d1d5db' : '#9B72F5', color:'#fff', fontSize:'13px', fontWeight:'500', cursor: postingComment || !commentText.trim() ? 'not-allowed' : 'pointer', flexShrink:0 }}>
+                  {postingComment ? '…' : 'Send'}
+                </button>
+              </div>
+            </div>
+
             {/* Edit mode */}
             {editMode && editForm && (
               <div style={{ marginTop:'16px', padding:'16px', background:'#f9fafb', borderRadius:'10px', border:'1px solid #e5e7eb' }}>
@@ -859,7 +971,7 @@ export default function RequestsPage() {
                   style={{ padding:'9px 16px', border:'1px solid #9B72F5', borderRadius:'8px', background:'#fff', color:'#9B72F5', fontSize:'14px', fontWeight:'500', cursor:'pointer' }}>
                   ⬇ PDF
                 </button>
-                <button onClick={() => { setSelectedOrder(null); setApprovalHistory([]); setPoAttachments([]); setEditMode(false); setEditForm(null) }}
+                <button onClick={() => { setSelectedOrder(null); setApprovalHistory([]); setPoAttachments([]); setPoComments([]); setCommentText(''); setEditMode(false); setEditForm(null) }}
                   style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>
                   Close
                 </button>
