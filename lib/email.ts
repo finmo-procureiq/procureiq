@@ -9,7 +9,7 @@ export async function sendEmail({ to, subject, html }: {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer re_KRPN6946_4wbBcs6F5dDvHkrLAatXhh3x',
+        'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -64,7 +64,7 @@ export function poApprovedEmail(po: any, approverName: string, isFinal: boolean)
         <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
           <tr style="background:#f9fafb"><td style="padding:10px 14px;font-size:13px;color:#6b7280;border-bottom:1px solid #e5e7eb">PO Number</td><td style="padding:10px 14px;font-size:13px;font-weight:600;border-bottom:1px solid #e5e7eb">${po.po_number}</td></tr>
           <tr><td style="padding:10px 14px;font-size:13px;color:#6b7280;border-bottom:1px solid #e5e7eb">Approved By</td><td style="padding:10px 14px;font-size:13px;border-bottom:1px solid #e5e7eb">${approverName}</td></tr>
-          <tr style="background:#f9fafb"><td style="padding:10px 14px;font-size:13px;color:#6b7280">Total Amount</td><td style="padding:10px 14px;font-size:13px;font-weight:600">${po.currency} ${Number(po.total_amount).toLocaleString()}</td></tr>
+          <tr style="background:#f9fafb"><td style="padding:10px 14px;font-size:13px;color:#6b7280">Total Amount</td><td style="padding:10px 14px;font-size:13px;font-weight:600">${po.currency} ${Number(po.amount).toLocaleString()}</td></tr>
         </table>
         <p style="color:#9ca3af;font-size:12px;margin-top:24px">ProcureIQ Enterprise - Automated notification</p>
       </div>
@@ -86,7 +86,7 @@ export function poRejectedEmail(po: any, approverName: string, reason: string) {
         <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
           <tr style="background:#f9fafb"><td style="padding:10px 14px;font-size:13px;color:#6b7280;border-bottom:1px solid #e5e7eb">PO Number</td><td style="padding:10px 14px;font-size:13px;font-weight:600;border-bottom:1px solid #e5e7eb">${po.po_number}</td></tr>
           <tr><td style="padding:10px 14px;font-size:13px;color:#6b7280;border-bottom:1px solid #e5e7eb">Rejected By</td><td style="padding:10px 14px;font-size:13px;border-bottom:1px solid #e5e7eb">${approverName}</td></tr>
-          <tr style="background:#f9fafb"><td style="padding:10px 14px;font-size:13px;color:#6b7280;border-bottom:1px solid #e5e7eb">Amount</td><td style="padding:10px 14px;font-size:13px;font-weight:600;border-bottom:1px solid #e5e7eb">${po.currency} ${Number(po.total_amount).toLocaleString()}</td></tr>
+          <tr style="background:#f9fafb"><td style="padding:10px 14px;font-size:13px;color:#6b7280;border-bottom:1px solid #e5e7eb">Amount</td><td style="padding:10px 14px;font-size:13px;font-weight:600;border-bottom:1px solid #e5e7eb">${po.currency} ${Number(po.amount).toLocaleString()}</td></tr>
           <tr><td style="padding:10px 14px;font-size:13px;color:#6b7280">Reason</td><td style="padding:10px 14px;font-size:13px;color:#dc2626">${reason}</td></tr>
         </table>
         <p style="color:#9ca3af;font-size:12px;margin-top:24px">ProcureIQ Enterprise - Automated notification</p>

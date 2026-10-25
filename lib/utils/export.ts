@@ -47,7 +47,7 @@ export function poListToCSV(rows: any[]): string {
       r.amount,
       csvCell(r.currency),
       r.tax_amount,
-      r.total_amount,
+      r.amount,
       csvCell(r.status),
       csvCell(r.priority),
       csvCell(r.current_level || ''),

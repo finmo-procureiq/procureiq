@@ -90,7 +90,7 @@ export default function ReportsPage() {
     const headers = ['PO Number','Supplier','Category','Amount','Currency','GST Rate','Tax','Total','Status','Priority','Maker','Submitted','Final Action','Date']
     const rows = (data || []).map(p => [
       p.po_number, (p.supplier as any)?.name, p.category,
-      p.amount, p.currency, `${p.tax_rate}%`, p.tax_amount, p.total_amount,
+      p.amount, p.currency, `${p.tax_rate}%`, p.tax_amount, p.amount,
       p.status, p.priority, (p.maker as any)?.full_name,
       p.submitted_at ? new Date(p.submitted_at).toLocaleDateString() : '',
       p.final_action || '', new Date(p.created_at).toLocaleDateString()
