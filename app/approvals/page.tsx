@@ -156,6 +156,9 @@ export default function ApprovalsPage() {
       if (action === 'reject') {
         // Reject the PO entirely
         await supabase.from('purchase_orders').update({ status: 'rejected' }).eq('id', po.id)
+      } else if (approvalRequest.level === 'FINANCE') {
+        // Finance is always the final step — mark PO as fully approved
+        await supabase.from('purchase_orders').update({ status: 'approved', final_action_at: now }).eq('id', po.id)
       } else {
         // Advance to next level
         const requiredLevels: string[] = po.required_levels || [approvalRequest.level]
