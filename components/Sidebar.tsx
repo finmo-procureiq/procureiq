@@ -23,13 +23,8 @@ export default function Sidebar() {
         .from('user_profiles').select('full_name, email').eq('id', user.id).single()
       setUserProfile(profile)
       // Fetch companies via API (bypasses RLS on companies table)
-      const [cosRes, memberships] = await Promise.all([
-        fetch('/api/companies').then(r => r.json()),
-        supabase.from('company_members')
-          .select('company_id, role:roles(code)')
-          .eq('user_id', user.id).eq('is_active', true)
-          .then(r => r.data)
-      ])
+      // Fetch companies via API (bypasses RLS) and memberships separately
+      const cosRes = await fetch('/api/companies').then(r => r.json())
       const uniqueCos = Array.isArray(cosRes) ? cosRes : []
       if (uniqueCos.length) {
         setCompanies(uniqueCos)
@@ -37,11 +32,12 @@ export default function Sidebar() {
         const active = uniqueCos.find((c: any) => c.id === saved) || uniqueCos[0]
         setActiveCompany(active)
         if (!saved && active) localStorage.setItem('activeCompanyId', active.id)
-        // Find role for active company
-        const activeMembership = (memberships || []).find((m: any) => m.company_id === active?.id) || (memberships || [])[0]
-        const role = (activeMembership as any)?.role?.code || ''
-        console.log('User role detected:', role)
-        setUserRole(role)
+      }
+      // Fetch role via API to avoid RLS issues with roles join
+      const roleRes = await fetch('/api/companies/my-role').then(r => r.json()).catch(() => ({}))
+      if (roleRes?.role) {
+        console.log('User role detected:', roleRes.role)
+        setUserRole(roleRes.role)
       }
     } catch(e) { console.error(e) }
   }
