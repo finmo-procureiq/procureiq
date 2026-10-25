@@ -136,6 +136,7 @@ export default function RequestsPage() {
       const requiredLevels = await getRequiredLevels(entityId, amount)
 
       // 2. Insert the PO with required_levels stored
+      // status uses po_status enum: draft, pending_l1, pending_l2, pending_l3, pending_finance, approved, rejected
       const { data: po, error: poError } = await supabase
         .from('purchase_orders')
         .insert({
@@ -149,9 +150,11 @@ export default function RequestsPage() {
           department: form.department,
           justification: form.justification || null,
           invoice_ref: form.invoice_ref || null,
+          created_by: user.id,
           requested_by: user.id,
+          submitted_at: new Date().toISOString(),
           status: 'pending_l1',
-          current_level: 1,
+          current_level: '1',
           required_levels: requiredLevels,
         })
         .select()
