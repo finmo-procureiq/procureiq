@@ -239,6 +239,50 @@ export default function ApprovalsPage() {
       setSameLevel([])
       setAllHistory([])
       await loadAll(user.id)
+
+      // Fire email notification (non-blocking)
+      try {
+        // Get maker email from user_profiles
+        const { data: makerProfile } = await supabase
+          .from('user_profiles')
+          .select('email, full_name')
+          .eq('id', po.created_by)
+          .single()
+
+        const { data: approverProfile } = await supabase
+          .from('user_profiles')
+          .select('full_name')
+          .eq('id', user.id)
+          .single()
+
+        if (makerProfile?.email) {
+          const isFinalApproval = action === 'approve' &&
+            (approvalRequest.level === 'FINANCE' ||
+              (po.required_levels || []).indexOf(approvalRequest.level) >= (po.required_levels || []).length - 1)
+
+          fetch('/api/email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: action === 'approve' ? 'po_approved' : 'po_rejected',
+              data: {
+                po: {
+                  id: po.id,
+                  po_number: po.po_number,
+                  amount: po.amount,
+                  currency: po.currency,
+                  company_id: po.company_id,
+                },
+                approverName: approverProfile?.full_name || user.email,
+                makerEmail: makerProfile.email,
+                isFinal: isFinalApproval,
+                reason: notes || '—',
+              }
+            })
+          }).catch(() => {})
+        }
+      } catch (_) { /* email errors are non-fatal */ }
+
     } catch (e: any) {
       alert('Error: ' + e.message)
     }

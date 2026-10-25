@@ -10,7 +10,7 @@ async function sendEmail(to: string, subject: string, html: string) {
   await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
-      'Authorization': 'Bearer re_KRPN6946_4wbBcs6F5dDvHkrLAatXhh3x',
+      'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ from: 'onboarding@resend.dev', to: [to], subject, html }),
@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
           <h2 style="color:#16a34a">${isFinal ? 'Your PO has been Fully Approved' : 'Approved - Pending Next Level'}</h2>
           <p><strong>PO Number:</strong> ${po.po_number}</p>
           <p><strong>Approved By:</strong> ${approverName}</p>
-          <p><strong>Total Amount:</strong> ${po.currency} ${Number(po.total_amount).toLocaleString()}</p>
+          <p><strong>Amount:</strong> ${po.currency} ${Number(po.amount).toLocaleString()}</p>
           <p style="color:#9ca3af;font-size:12px">ProcureIQ Enterprise</p>
         </div>`
       )

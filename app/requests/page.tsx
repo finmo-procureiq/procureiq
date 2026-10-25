@@ -327,6 +327,28 @@ export default function RequestsPage() {
       // Reload the user's primary entity view
       if (entityId) await loadAll(entityId)
 
+      // Fire email notification (non-blocking — don't await, don't fail on error)
+      fetch('/api/email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'po_submitted',
+          data: {
+            po: {
+              id: po.id,
+              po_number: po.po_number,
+              company_id: submitEntityId,
+              amount,
+              currency: form.currency,
+              description: form.description,
+              category: form.department,
+              supplier_name: formSuppliers.find((s: any) => s.id === form.supplier_id)?.name || null,
+            },
+            makerEmail: user.email,
+          }
+        })
+      }).catch(() => {}) // silently ignore email failures
+
       const chain = requiredLevels.join(' → ')
       alert(`Request submitted!\nApproval chain: ${chain}\n\nSent to ${firstLevel} approver${approvers.length !== 1 ? 's' : ''} for review.`)
     } catch (e: any) {
