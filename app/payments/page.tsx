@@ -38,13 +38,11 @@ export default function PaymentsPage() {
     const { data: recorded } = await supabase
       .from('payments')
       .select('*, supplier:suppliers(name), po:purchase_orders(po_number)')
-      .eq('company_id', companyId)
       .order('created_at', { ascending: false })
 
     const { data: approvedPOs } = await supabase
       .from('purchase_orders')
-      .select('id, po_number, amount, tax_amount, currency, required_by, final_action_at, supplier_id, supplier:suppliers(id, name)')
-      .eq('company_id', companyId)
+      .select('id, po_number, amount, tax_amount, currency, required_by, final_action_at, supplier_id, company_id, supplier:suppliers(id, name)')
       .eq('status', 'approved')
       .order('final_action_at', { ascending: false })
 
@@ -85,7 +83,7 @@ export default function PaymentsPage() {
 
   async function loadPOs() {
     const { data } = await supabase.from('purchase_orders').select('id, po_number')
-      .eq('company_id', companyId).eq('status', 'approved')
+      .eq('status', 'approved')
     setPOs(data || [])
   }
 
