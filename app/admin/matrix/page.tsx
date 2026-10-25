@@ -19,21 +19,11 @@ export default function MatrixPage() {
   useEffect(() => { if (companyId) loadMatrix() }, [companyId])
 
   async function init() {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setLoading(false); return }
-    const { data } = await supabase
-      .from('company_members')
-      .select('companies(id, name, code, currency)')
-      .eq('user_id', user.id)
-      .eq('is_active', true)
-    if (data?.length) {
-      const seen = new Set()
-      const cos = data
-        .map((m: any) => m.companies)
-        .filter((c: any) => c && !seen.has(c.id) && seen.add(c.id))
-        .sort((a: any, b: any) => a.name.localeCompare(b.name))
-      setCompanies(cos)
-      setCompanyId(cos[0].id)
+    const res = await fetch('/api/companies')
+    const data = await res.json()
+    if (Array.isArray(data) && data.length) {
+      setCompanies(data)
+      setCompanyId(data[0].id)
     }
     setLoading(false)
   }

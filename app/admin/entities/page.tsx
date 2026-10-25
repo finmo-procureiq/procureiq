@@ -18,21 +18,9 @@ export default function EntitiesPage() {
 
   async function loadEntities() {
     setLoading(true)
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setLoading(false); return }
-    const { data, error } = await supabase
-      .from('company_members')
-      .select('companies(id, name, code, currency, country, is_active)')
-      .eq('user_id', user.id)
-      .eq('is_active', true)
-    if (!error && data) {
-      const seen = new Set()
-      const cos = data
-        .map((m: any) => m.companies)
-        .filter((c: any) => c && !seen.has(c.id) && seen.add(c.id))
-        .sort((a: any, b: any) => a.name.localeCompare(b.name))
-      setEntities(cos)
-    }
+    const res = await fetch('/api/companies')
+    const data = await res.json()
+    if (Array.isArray(data)) setEntities(data)
     setLoading(false)
   }
 

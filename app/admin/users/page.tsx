@@ -41,19 +41,10 @@ export default function UsersPage() {
   useEffect(() => { init() }, [])
 
   async function init() {
-    const { data: { user } } = await supabase.auth.getUser()
-    const { data: memData } = await supabase
-      .from('company_members')
-      .select('companies(id, name, code)')
-      .eq('user_id', user?.id)
-      .eq('is_active', true)
-    const seen = new Set()
-    const cos = (memData || [])
-      .map((m: any) => m.companies)
-      .filter((c: any) => c && !seen.has(c.id) && seen.add(c.id))
-      .sort((a: any, b: any) => a.name.localeCompare(b.name))
-    setCompanies(cos)
-    await load(cos)
+    const res = await fetch('/api/companies')
+    const cos = await res.json()
+    setCompanies(Array.isArray(cos) ? cos : [])
+    await load(Array.isArray(cos) ? cos : [])
   }
 
   async function load(cos?: any[]) {
