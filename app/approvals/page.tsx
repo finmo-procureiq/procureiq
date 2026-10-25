@@ -75,14 +75,52 @@ export default function ApprovalsPage() {
 
     if (pendingErr) console.error('pending query error:', pendingErr)
 
+    // Check active delegations where this user is the delegate
+    const today = new Date().toISOString().slice(0, 10)
+    const { data: delegations } = await supabase
+      .from('approver_delegations')
+      .select('delegator_id, delegator_name')
+      .eq('delegate_id', userId)
+      .eq('is_active', true)
+      .lte('from_date', today)
+      .gte('to_date', today)
+
+    // Fetch delegated pending approvals (from delegators)
+    const delegatedRaw: any[] = []
+    for (const delegation of (delegations || [])) {
+      const { data: delegatedArs } = await supabase
+        .from('approval_requests')
+        .select('*')
+        .eq('submitted_by', delegation.delegator_id)
+        .eq('document_type', 'purchase_order')
+        .in('status', ['submitted', 'pending'])
+        .order('created_at', { ascending: false })
+      for (const ar of (delegatedArs || [])) {
+        delegatedRaw.push({ ...ar, _delegated_from: delegation.delegator_name })
+      }
+    }
+
     // Fetch related POs separately to avoid FK join issues
     const pending = []
+    const seenIds = new Set<string>()
     for (const ar of (pendingRaw || [])) {
       const { data: po } = await supabase
         .from('purchase_orders')
         .select('id, po_number, title, amount, currency, department, description, justification, invoice_ref, status, current_level, required_levels, created_at, company_id, created_by')
         .eq('id', ar.document_id)
         .single()
+      seenIds.add(ar.document_id)
+      pending.push({ ...ar, purchase_order: po })
+    }
+    // Merge delegated POs (skip any already in own queue)
+    for (const ar of delegatedRaw) {
+      if (seenIds.has(ar.document_id)) continue
+      const { data: po } = await supabase
+        .from('purchase_orders')
+        .select('id, po_number, title, amount, currency, department, description, justification, invoice_ref, status, current_level, required_levels, created_at, company_id, created_by')
+        .eq('id', ar.document_id)
+        .single()
+      seenIds.add(ar.document_id)
       pending.push({ ...ar, purchase_order: po })
     }
 
@@ -396,6 +434,11 @@ export default function ApprovalsPage() {
                         <span style={{ padding:'2px 8px', borderRadius:'20px', fontSize:'11px', fontWeight:'600', background:'#ede9fe', color:'#7c3aed' }}>
                           Awaiting your {req.level} approval
                         </span>
+                        {req._delegated_from && (
+                          <span style={{ padding:'2px 8px', borderRadius:'20px', fontSize:'11px', fontWeight:'600', background:'#fff7ed', color:'#c2410c' }}>
+                            🔁 Delegated from {req._delegated_from}
+                          </span>
+                        )}
                       </div>
                       <h3 style={{ fontSize:'16px', fontWeight:'600', margin:'0 0 6px 0', color:'#111827' }}>{po.title}</h3>
                       <div style={{ display:'flex', gap:'16px', fontSize:'13px', color:'#6b7280', flexWrap:'wrap' }}>
