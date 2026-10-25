@@ -25,7 +25,12 @@ export default function RequestsPage() {
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
   const [formEntityId, setFormEntityId] = useState<string | null>(null)
   const [formSuppliers, setFormSuppliers] = useState<any[]>([])
+  const [attachments, setAttachments] = useState<File[]>([])
+  const [uploading, setUploading] = useState(false)
   const [approvalHistory, setApprovalHistory] = useState<any[]>([])
+  const [actioning, setActioning] = useState(false)
+  const [editMode, setEditMode] = useState(false)
+  const [editForm, setEditForm] = useState<any>(null)
   const [form, setForm] = useState({
     title: '', description: '', amount: '', currency: 'INR',
     supplier_id: '', department: '', justification: '', invoice_ref: ''
@@ -115,6 +120,109 @@ export default function RequestsPage() {
     setApprovalHistory(data || [])
   }
 
+  async function handleRecall(po: any) {
+    if (!confirm(`Recall "${po.title}"? It will be moved back to Draft so you can edit and resubmit.`)) return
+    setActioning(true)
+    try {
+      // Cancel all pending approval_requests for this PO
+      await supabase.from('approval_requests')
+        .update({ status: 'cancelled' })
+        .eq('document_id', po.id)
+        .eq('document_type', 'purchase_order')
+        .eq('status', 'submitted')
+      // Move PO back to draft
+      await supabase.from('purchase_orders')
+        .update({ status: 'draft', current_level: '0' })
+        .eq('id', po.id)
+      setSelectedOrder(null)
+      setApprovalHistory([])
+      if (entityId) await loadAll(entityId)
+    } catch (e: any) { alert('Error: ' + e.message) }
+    setActioning(false)
+  }
+
+  async function handleVoid(po: any) {
+    if (!confirm(`Void "${po.title}"? This cannot be undone.`)) return
+    setActioning(true)
+    try {
+      await supabase.from('approval_requests')
+        .update({ status: 'cancelled' })
+        .eq('document_id', po.id)
+        .eq('document_type', 'purchase_order')
+        .eq('status', 'submitted')
+      await supabase.from('purchase_orders')
+        .update({ status: 'cancelled' })
+        .eq('id', po.id)
+      setSelectedOrder(null)
+      setApprovalHistory([])
+      if (entityId) await loadAll(entityId)
+    } catch (e: any) { alert('Error: ' + e.message) }
+    setActioning(false)
+  }
+
+  async function handleEditSubmit(po: any) {
+    if (!editForm) return
+    setActioning(true)
+    try {
+      await supabase.from('purchase_orders')
+        .update({
+          title: editForm.title,
+          description: editForm.description || null,
+          amount: parseFloat(editForm.amount),
+          currency: editForm.currency,
+          department: editForm.department,
+          justification: editForm.justification || null,
+          invoice_ref: editForm.invoice_ref || null,
+          supplier_id: editForm.supplier_id || null,
+        })
+        .eq('id', po.id)
+      setEditMode(false)
+      setEditForm(null)
+      setSelectedOrder(null)
+      setApprovalHistory([])
+      if (entityId) await loadAll(entityId)
+    } catch (e: any) { alert('Error: ' + e.message) }
+    setActioning(false)
+  }
+
+  async function handleResubmit(po: any) {
+    if (!confirm(`Resubmit "${po.title}" for approval?`)) return
+    setActioning(true)
+    try {
+      const amount = po.amount
+      const submitEntityId = po.company_id
+      const requiredLevels = await getRequiredLevels(submitEntityId, amount)
+      const firstLevel = requiredLevels[0]
+      const approvers = await getApproversForLevel(submitEntityId, firstLevel)
+
+      await supabase.from('purchase_orders')
+        .update({
+          status: 'pending_l1',
+          current_level: '1',
+          required_levels: requiredLevels,
+          submitted_at: new Date().toISOString(),
+        })
+        .eq('id', po.id)
+
+      if (approvers.length > 0) {
+        await supabase.from('approval_requests').insert(
+          approvers.map((uid: string) => ({
+            document_id: po.id,
+            document_type: 'purchase_order',
+            submitted_by: uid,
+            status: 'submitted',
+            level: firstLevel,
+          }))
+        )
+      }
+      setSelectedOrder(null)
+      setApprovalHistory([])
+      if (entityId) await loadAll(entityId)
+      alert(`Resubmitted! Approval chain: ${requiredLevels.join(' → ')}`)
+    } catch (e: any) { alert('Error: ' + e.message) }
+    setActioning(false)
+  }
+
   async function getRequiredLevels(companyId: string, amount: number): Promise<string[]> {
     const { data: matrix } = await supabase
       .from('approval_matrix')
@@ -201,7 +309,16 @@ export default function RequestsPage() {
         if (arErr) throw new Error('approval_requests insert failed: ' + arErr.message + ' | code: ' + arErr.code + ' | details: ' + arErr.details)
       }
 
+      // 4. Upload attachments to Supabase storage if any
+      if (attachments.length > 0) {
+        for (const file of attachments) {
+          const filePath = `purchase_orders/${po.id}/${Date.now()}_${file.name}`
+          await supabase.storage.from('attachments').upload(filePath, file, { upsert: true })
+        }
+      }
+
       setShowForm(false)
+      setAttachments([])
       setForm(f => ({ ...f, title:'', description:'', amount:'', supplier_id:'', justification:'', invoice_ref:'' }))
       // Reload the user's primary entity view
       if (entityId) await loadAll(entityId)
@@ -222,6 +339,9 @@ export default function RequestsPage() {
     approved:        { label: 'Approved',        color: '#16a34a', bg: '#f0fdf4' },
     rejected:        { label: 'Rejected',        color: '#dc2626', bg: '#fef2f2' },
     recalled:        { label: 'Recalled',        color: '#6b7280', bg: '#f3f4f6' },
+    cancelled:       { label: 'Void',            color: '#6b7280', bg: '#f3f4f6' },
+    draft:           { label: 'Draft',           color: '#6b7280', bg: '#f3f4f6' },
+    on_hold:         { label: 'On Hold',         color: '#d97706', bg: '#fef3c7' },
   }
 
   const inp: React.CSSProperties = { width:'100%', padding:'8px 11px', border:'1px solid #d1d5db', borderRadius:'8px', fontFamily:'sans-serif', fontSize:'13px', outline:'none', boxSizing:'border-box' }
@@ -392,11 +512,82 @@ export default function RequestsPage() {
               </div>
             )}
 
-            <div style={{ display:'flex', justifyContent:'flex-end', marginTop:'20px' }}>
-              <button onClick={() => { setSelectedOrder(null); setApprovalHistory([]) }}
-                style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>
-                Close
-              </button>
+            {/* Edit mode */}
+            {editMode && editForm && (
+              <div style={{ marginTop:'16px', padding:'16px', background:'#f9fafb', borderRadius:'10px', border:'1px solid #e5e7eb' }}>
+                <div style={{ fontSize:'13px', fontWeight:'600', color:'#374151', marginBottom:'12px' }}>Edit Request</div>
+                <div style={{ display:'flex', flexDirection:'column', gap:'10px' }}>
+                  <div><label style={lbl}>Title</label><input style={inp} value={editForm.title} onChange={e => setEditForm({...editForm, title:e.target.value})}/></div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
+                    <div><label style={lbl}>Amount</label><input style={inp} type="number" value={editForm.amount} onChange={e => setEditForm({...editForm, amount:e.target.value})}/></div>
+                    <div><label style={lbl}>Currency</label>
+                      <select style={inp} value={editForm.currency} onChange={e => setEditForm({...editForm, currency:e.target.value})}>
+                        {['INR','SGD','AED','USD','EUR','GBP','MYR','HKD'].map(c => <option key={c}>{c}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div><label style={lbl}>Department</label>
+                    <select style={inp} value={editForm.department} onChange={e => setEditForm({...editForm, department:e.target.value})}>
+                      {['IT','Finance','HR','GatewayOps','Compliance','FinOps','RevOps','Customer Success','Legal','Marketing','Sales','Admin'].map(d => <option key={d}>{d}</option>)}
+                    </select>
+                  </div>
+                  <div><label style={lbl}>Invoice Ref</label><input style={inp} value={editForm.invoice_ref||''} onChange={e => setEditForm({...editForm, invoice_ref:e.target.value})}/></div>
+                  <div><label style={lbl}>Description</label><textarea style={{...inp,height:'60px',resize:'vertical' as any}} value={editForm.description||''} onChange={e => setEditForm({...editForm, description:e.target.value})}/></div>
+                  <div><label style={lbl}>Justification</label><textarea style={{...inp,height:'60px',resize:'vertical' as any}} value={editForm.justification||''} onChange={e => setEditForm({...editForm, justification:e.target.value})}/></div>
+                </div>
+                <div style={{ display:'flex', gap:'8px', marginTop:'12px', justifyContent:'flex-end' }}>
+                  <button onClick={() => { setEditMode(false); setEditForm(null) }}
+                    style={{ padding:'7px 14px', border:'1px solid #e5e7eb', borderRadius:'7px', background:'#fff', fontSize:'13px', cursor:'pointer' }}>Cancel</button>
+                  <button onClick={() => handleEditSubmit(selectedOrder)} disabled={actioning}
+                    style={{ padding:'7px 14px', border:'none', borderRadius:'7px', background:'#9B72F5', color:'#fff', fontSize:'13px', fontWeight:'500', cursor:'pointer' }}>Save Changes</button>
+                </div>
+              </div>
+            )}
+
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:'20px' }}>
+              {/* Action buttons — only show for non-terminal statuses */}
+              {['pending_l1','pending_l2','pending_l3','pending_finance','draft'].includes(selectedOrder.status) && !editMode && (
+                <div style={{ display:'flex', gap:'8px' }}>
+                  {selectedOrder.status === 'draft' ? (
+                    <button onClick={() => handleResubmit(selectedOrder)} disabled={actioning}
+                      style={{ padding:'7px 14px', border:'none', borderRadius:'7px', background:'#16a34a', color:'#fff', fontSize:'13px', fontWeight:'500', cursor:'pointer' }}>
+                      ↑ Resubmit
+                    </button>
+                  ) : (
+                    <button onClick={async () => {
+                      // Recall first (cancel pending approvals, set to draft), then open edit
+                      setActioning(true)
+                      try {
+                        await supabase.from('approval_requests')
+                          .update({ status: 'cancelled' })
+                          .eq('document_id', selectedOrder.id)
+                          .eq('document_type', 'purchase_order')
+                          .eq('status', 'submitted')
+                        await supabase.from('purchase_orders')
+                          .update({ status: 'draft', current_level: '0' })
+                          .eq('id', selectedOrder.id)
+                        setSelectedOrder((o: any) => ({ ...o, status: 'draft' }))
+                        setEditMode(true)
+                        setEditForm({ title:selectedOrder.title, description:selectedOrder.description||'', amount:String(selectedOrder.amount), currency:selectedOrder.currency||'INR', department:selectedOrder.department||'', justification:selectedOrder.justification||'', invoice_ref:selectedOrder.invoice_ref||'', supplier_id:selectedOrder.supplier_id||'' })
+                      } catch(e: any) { alert('Error: ' + e.message) }
+                      setActioning(false)
+                    }} disabled={actioning}
+                      style={{ padding:'7px 14px', border:'1px solid #9B72F5', borderRadius:'7px', background:'#fff', color:'#9B72F5', fontSize:'13px', fontWeight:'500', cursor:'pointer' }}>
+                      ✏ Edit & Recall
+                    </button>
+                  )}
+                  <button onClick={() => handleVoid(selectedOrder)} disabled={actioning}
+                    style={{ padding:'7px 14px', border:'1px solid #fecaca', borderRadius:'7px', background:'#fff', color:'#dc2626', fontSize:'13px', fontWeight:'500', cursor:'pointer' }}>
+                    ✕ Void
+                  </button>
+                </div>
+              )}
+              <div style={{ marginLeft:'auto' }}>
+                <button onClick={() => { setSelectedOrder(null); setApprovalHistory([]); setEditMode(false); setEditForm(null) }}
+                  style={{ padding:'9px 18px', border:'1px solid #e5e7eb', borderRadius:'8px', background:'#fff', fontSize:'14px', cursor:'pointer' }}>
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -476,6 +667,24 @@ export default function RequestsPage() {
                 <label style={lbl}>Business Justification</label>
                 <textarea style={{...inp, height:'72px', resize:'vertical' as any}} value={form.justification}
                   onChange={e => setForm({...form, justification:e.target.value})} placeholder="Why is this purchase needed?"/>
+              </div>
+
+              <div>
+                <label style={lbl}>Attachments (Invoice, Contract, etc.)</label>
+                <input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
+                  onChange={e => setAttachments(Array.from(e.target.files || []))}
+                  style={{ width:'100%', padding:'8px', border:'1px dashed #d1d5db', borderRadius:'8px', fontSize:'13px', cursor:'pointer', boxSizing:'border-box' }}/>
+                {attachments.length > 0 && (
+                  <div style={{ marginTop:'6px', display:'flex', flexDirection:'column', gap:'4px' }}>
+                    {attachments.map((f, i) => (
+                      <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'4px 8px', background:'#f9fafb', borderRadius:'6px', fontSize:'12px', color:'#6b7280' }}>
+                        <span>📎 {f.name}</span>
+                        <button onClick={() => setAttachments(a => a.filter((_, j) => j !== i))}
+                          style={{ background:'none', border:'none', color:'#dc2626', cursor:'pointer', fontSize:'14px', padding:'0 4px' }}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
