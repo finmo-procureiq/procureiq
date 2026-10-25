@@ -59,41 +59,50 @@ export default function ApprovalsPage() {
 
   async function loadAll(userId: string, companyId: string) {
     // Pending: approval_requests where submitted_by = this user AND status = 'submitted'
-    const { data: pending } = await supabase
+    const { data: pendingRaw, error: pendingErr } = await supabase
       .from('approval_requests')
-      .select(`
-        *,
-        purchase_order:purchase_orders!approval_requests_document_id_fkey(
-          id, po_number, title, amount, currency, department, description,
-          justification, invoice_ref, status, current_level, required_levels,
-          created_at, company_id,
-          creator:user_profiles!purchase_orders_created_by_fkey(full_name, email),
-          supplier:suppliers(name)
-        )
-      `)
+      .select('*')
       .eq('submitted_by', userId)
       .eq('document_type', 'purchase_order')
       .in('status', ['submitted', 'pending'])
       .order('created_at', { ascending: false })
 
-    setRequests(pending || [])
+    if (pendingErr) console.error('pending query error:', pendingErr)
+
+    // Fetch related POs separately to avoid FK join issues
+    const pending = []
+    for (const ar of (pendingRaw || [])) {
+      const { data: po } = await supabase
+        .from('purchase_orders')
+        .select('id, po_number, title, amount, currency, department, description, justification, invoice_ref, status, current_level, required_levels, created_at, company_id, created_by')
+        .eq('id', ar.document_id)
+        .single()
+      pending.push({ ...ar, purchase_order: po })
+    }
+
+    setRequests(pending)
 
     // History: acted on (approved or rejected)
-    const { data: history } = await supabase
+    const { data: historyRaw } = await supabase
       .from('approval_requests')
-      .select(`
-        *,
-        purchase_order:purchase_orders!approval_requests_document_id_fkey(
-          id, po_number, title, amount, currency, department, status, required_levels
-        )
-      `)
+      .select('*')
       .eq('submitted_by', userId)
       .eq('document_type', 'purchase_order')
       .in('status', ['approved', 'rejected'])
       .order('responded_at', { ascending: false })
       .limit(50)
 
-    setHistoryAll(history || [])
+    const history = []
+    for (const ar of (historyRaw || [])) {
+      const { data: po } = await supabase
+        .from('purchase_orders')
+        .select('id, po_number, title, amount, currency, department, status, required_levels')
+        .eq('id', ar.document_id)
+        .single()
+      history.push({ ...ar, purchase_order: po })
+    }
+
+    setHistoryAll(history)
   }
 
   async function loadSameLevelHistory(poId: string, level: string) {
