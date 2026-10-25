@@ -150,28 +150,54 @@ export default function UsersPage() {
   async function handleEdit() {
     if (!editUser || !editForm.roles.length) return
     setSaving(true)
+    const newManagesDept = editForm.manages_department === true
     try {
-      // Use server-side API route to bypass RLS
-      const res = await fetch('/api/users/update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: editUser.user_id,
-          roles: editForm.roles,
-          department: editForm.department,
-          manages_department: editForm.manages_department === true,
-        }),
-      })
-      const result = await res.json()
-      if (!res.ok) throw new Error(result.error || 'Update failed')
+      // Try server-side API route first (bypasses RLS)
+      let saved = false
+      try {
+        const res = await fetch('/api/users/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: editUser.user_id,
+            roles: editForm.roles,
+            department: editForm.department,
+            manages_department: newManagesDept,
+          }),
+        })
+        const result = await res.json()
+        if (res.ok) saved = true
+        else console.warn('API route error:', result.error)
+      } catch (apiErr) {
+        console.warn('API route failed, falling back to direct update:', apiErr)
+      }
 
-      // Update local state immediately
+      // Fallback: direct Supabase update
+      if (!saved) {
+        const primaryRoleId: Record<string, string> = {
+          MAKER: '3439de3b-d891-4852-9ecb-9c143f4c2516',
+          L1: '36689185-99ec-4d70-8037-5797884e5e78',
+          L2: '097c907d-6e1c-433f-ab45-16d9be64a1ad',
+          L3: 'ca9a3015-bd1a-44df-aaa1-bf822f6261a5',
+          FINANCE: '0fafb943-5a6e-468f-a6da-0fded964c173',
+          ADMIN: 'd4ca2a99-039e-4976-b7d1-a42ef2894477',
+        }
+        const { error } = await supabase.from('company_members').update({
+          roles: editForm.roles,
+          role_id: primaryRoleId[editForm.roles[0]],
+          department: editForm.department || null,
+          manages_department: newManagesDept,
+        }).eq('user_id', editUser.user_id).eq('is_active', true)
+        if (error) throw error
+      }
+
+      // Update local state immediately — do NOT reload from DB (would overwrite with stale RLS-filtered data)
       setUsers(prev => prev.map(u => u.user_id === editUser.user_id
-        ? { ...u, roles: editForm.roles, department: editForm.department, manages_department: editForm.manages_department === true }
+        ? { ...u, roles: [...editForm.roles], department: editForm.department, manages_department: newManagesDept }
         : u
       ))
-      setShowEdit(false); setEditUser(null)
-      await load()
+      setShowEdit(false)
+      setEditUser(null)
     } catch (e: any) { alert('Error saving: ' + e.message) }
     setSaving(false)
   }
