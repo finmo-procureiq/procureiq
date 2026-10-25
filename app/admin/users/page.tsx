@@ -92,7 +92,7 @@ export default function UsersPage() {
           email: p.email || uid,
           full_name: p.full_name || p.email || uid,
           department: m.department || p.department || '',
-          manages_department: m.manages_department || false,
+          manages_department: m.manages_department || true,
           roles,
           companies: [],
           member_rows: [],
