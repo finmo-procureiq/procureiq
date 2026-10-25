@@ -168,9 +168,11 @@ export default function RequestsPage() {
 
       if (approvers.length > 0) {
         const approvalRows = approvers.map((approverId: string) => ({
-          purchase_order_id: po.id,
-          approver_id: approverId,
-          status: 'pending',
+          document_id: po.id,
+          document_type: 'purchase_order',
+          entity_id: entityId,
+          submitted_by: approverId,
+          status: 'submitted',
           level: firstLevel,
         }))
         const { error: arErr } = await supabase.from('approval_requests').insert(approvalRows)
