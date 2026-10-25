@@ -5,14 +5,6 @@ import { createClient } from '@/lib/supabase/browser'
 const DEPARTMENTS = ['IT','Finance','HR','GatewayOps','Compliance','FinOps','RevOps','Customer Success','Legal','Marketing','Sales','Admin']
 const CURRENCIES = ['INR','SGD','AED','USD','EUR','GBP','MYR','HKD']
 
-const COMPANIES: Record<string, { code: string; currency: string; name: string }> = {
-  '33a0603c-5b4e-4418-9683-1a5d544560ea': { code: 'ACIN', currency: 'INR', name: 'Acme India Pvt Ltd' },
-  'f1d448b1-bc01-4f86-b3fc-6bc0b31c992e': { code: 'ACSG', currency: 'SGD', name: 'Acme Singapore Pte Ltd' },
-  '485d369d-087f-4776-a70b-6d1203e29c2d': { code: 'ACAE', currency: 'AED', name: 'Acme UAE LLC' },
-  '8d37db04-7eb7-4b76-afed-df2a50590d7f': { code: 'FTSG', currency: 'SGD', name: 'Finmo Tech Pte Ltd' },
-  'fcf15fb0-29e9-466d-aad2-5b0cf2089a0b': { code: 'FTIN', currency: 'INR', name: 'Finmo Tech India Pvt Ltd' },
-}
-
 export default function RequestsPage() {
   const [orders, setOrders] = useState<any[]>([])
   const [suppliers, setSuppliers] = useState<any[]>([])
@@ -22,6 +14,8 @@ export default function RequestsPage() {
   const [user, setUser] = useState<any>(null)
   const [entityId, setEntityId] = useState<string | null>(null)
   const [entityCode, setEntityCode] = useState<string>('')
+  const [companies, setCompanies] = useState<any[]>([])
+  const [companiesMap, setCompaniesMap] = useState<Record<string, { code: string; currency: string; name: string }>>({})
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
   const [formEntityId, setFormEntityId] = useState<string | null>(null)
   const [formSuppliers, setFormSuppliers] = useState<any[]>([])
@@ -41,6 +35,16 @@ export default function RequestsPage() {
 
   async function init() {
     try {
+      // Load companies from API (bypasses RLS)
+      const cosRes = await fetch('/api/companies')
+      const cosData = await cosRes.json()
+      const cosMap: Record<string, { code: string; currency: string; name: string }> = {}
+      if (Array.isArray(cosData)) {
+        setCompanies(cosData)
+        cosData.forEach((c: any) => { cosMap[c.id] = { code: c.code, currency: c.currency, name: c.name } })
+        setCompaniesMap(cosMap)
+      }
+
       const { data: { user: u } } = await supabase.auth.getUser()
       if (!u) return
       setUser(u)
@@ -57,7 +61,7 @@ export default function RequestsPage() {
         const eid = member.company_id
         setEntityId(eid)
         setFormEntityId(eid)
-        const co = COMPANIES[eid]
+        const co = cosMap[eid]
         setEntityCode(co?.code || 'PO')
         // Default form currency to entity currency
         setForm(f => ({ ...f, currency: co?.currency || 'INR' }))
@@ -103,7 +107,7 @@ export default function RequestsPage() {
 
   async function handleFormEntityChange(eid: string) {
     setFormEntityId(eid)
-    const co = COMPANIES[eid]
+    const co = companiesMap[eid]
     setForm(f => ({ ...f, currency: co?.currency || 'INR', supplier_id: '' }))
     await loadFormSuppliers(eid)
   }
@@ -260,7 +264,7 @@ export default function RequestsPage() {
 
     try {
       const amount = parseFloat(form.amount)
-      const co = COMPANIES[submitEntityId]
+      const co = companiesMap[submitEntityId]
       const code = co?.code || entityCode || 'PO'
       const poNumber = `${code}-${Date.now().toString().slice(-6)}`
 
@@ -399,7 +403,7 @@ export default function RequestsPage() {
                     onMouseLeave={e => (e.currentTarget.style.background='')}>
                     <td style={{ padding:'12px 16px', fontFamily:'monospace', fontSize:'12px', color:'#6b7280' }}>{o.po_number}</td>
                     <td style={{ padding:'12px 16px', fontWeight:'500' }}>{o.title}</td>
-                    <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{COMPANIES[o.company_id]?.code || '—'}</td>
+                    <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{companiesMap[o.company_id]?.code || '—'}</td>
                     <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{o.department || '—'}</td>
                     <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{o.supplier?.name || '—'}</td>
                     <td style={{ padding:'12px 16px', fontWeight:'600', color:'#111827' }}>{fmtAmt(o.amount, o.currency || 'INR')}</td>
@@ -606,8 +610,8 @@ export default function RequestsPage() {
               <div>
                 <label style={lbl}>Entity (Legal Entity) *</label>
                 <select style={inp} value={formEntityId || ''} onChange={e => handleFormEntityChange(e.target.value)}>
-                  {Object.entries(COMPANIES).map(([id, co]) => (
-                    <option key={id} value={id}>{co.name} ({co.code})</option>
+                  {companies.map((co: any) => (
+                    <option key={co.id} value={co.id}>{co.name} ({co.code})</option>
                   ))}
                 </select>
               </div>

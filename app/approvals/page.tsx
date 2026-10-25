@@ -7,14 +7,6 @@ import { createClient } from '@/lib/supabase/browser'
 // submitted_at, approved_by, approved_at, rejected_by, rejected_at,
 // reject_reason, created_at, level, notes, amount_usd, responded_at
 
-const COMPANIES: Record<string, { code: string; currency: string; name: string }> = {
-  '33a0603c-5b4e-4418-9683-1a5d544560ea': { code: 'ACIN', currency: 'INR', name: 'Acme India Pvt Ltd' },
-  'f1d448b1-bc01-4f86-b3fc-6bc0b31c992e': { code: 'ACSG', currency: 'SGD', name: 'Acme Singapore Pte Ltd' },
-  '485d369d-087f-4776-a70b-6d1203e29c2d': { code: 'ACAE', currency: 'AED', name: 'Acme UAE LLC' },
-  '8d37db04-7eb7-4b76-afed-df2a50590d7f': { code: 'FTSG', currency: 'SGD', name: 'Finmo Tech Pte Ltd' },
-  'fcf15fb0-29e9-466d-aad2-5b0cf2089a0b': { code: 'FTIN', currency: 'INR', name: 'Finmo Tech India Pvt Ltd' },
-}
-
 export default function ApprovalsPage() {
   const [requests, setRequests] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -28,28 +20,39 @@ export default function ApprovalsPage() {
   const [showActionModal, setShowActionModal] = useState<{ request: any; action: 'approve' | 'reject' } | null>(null)
   const [historyAll, setHistoryAll] = useState<any[]>([])
   const [sameLevel, setSameLevel] = useState<any[]>([])
+  const [companiesMap, setCompaniesMap] = useState<Record<string, { code: string; currency: string; name: string }>>({})
 
   const supabase = createClient()
   useEffect(() => { init() }, [])
 
   async function init() {
     try {
+      // Load companies from API (bypasses RLS)
+      const cosRes = await fetch('/api/companies')
+      const cosData = await cosRes.json()
+      if (Array.isArray(cosData)) {
+        const map: Record<string, { code: string; currency: string; name: string }> = {}
+        cosData.forEach((c: any) => { map[c.id] = { code: c.code, currency: c.currency, name: c.name } })
+        setCompaniesMap(map)
+      }
+
       const { data: { user: u } } = await supabase.auth.getUser()
       if (!u) return
       setUser(u)
 
-      const { data: member } = await supabase
+      // Load roles across ALL entities the user belongs to
+      const { data: members } = await supabase
         .from('company_members')
         .select('company_id, roles')
         .eq('user_id', u.id)
         .eq('is_active', true)
-        .limit(1)
-        .single()
 
-      if (member) {
-        setEntityId(member.company_id)
-        setUserRoles(member.roles || [])
-        await loadAll(u.id, member.company_id)
+      if (members && members.length > 0) {
+        // Collect all unique roles across all entities
+        const allRoles = Array.from(new Set(members.flatMap((m: any) => m.roles || [])))
+        setUserRoles(allRoles)
+        setEntityId(members[0].company_id)
+        await loadAll(u.id)
       }
     } catch (e) {
       console.error('init error:', e)
@@ -57,8 +60,9 @@ export default function ApprovalsPage() {
     setLoading(false)
   }
 
-  async function loadAll(userId: string, companyId: string) {
-    // Pending: approval_requests where submitted_by = this user AND status = 'submitted'
+  async function loadAll(userId: string) {
+    // Pending: approval_requests where submitted_by = this user (approver) AND status = 'submitted'
+    // Note: in this schema, submitted_by stores the APPROVER's user_id (the person who needs to act)
     const { data: pendingRaw, error: pendingErr } = await supabase
       .from('approval_requests')
       .select('*')
@@ -82,7 +86,7 @@ export default function ApprovalsPage() {
 
     setRequests(pending)
 
-    // History: acted on (approved or rejected)
+    // History: acted on (approved or rejected) by this user
     const { data: historyRaw } = await supabase
       .from('approval_requests')
       .select('*')
@@ -234,7 +238,7 @@ export default function ApprovalsPage() {
       setNotes('')
       setSameLevel([])
       setAllHistory([])
-      await loadAll(user.id, entityId || poCompanyId)
+      await loadAll(user.id)
     } catch (e: any) {
       alert('Error: ' + e.message)
     }
