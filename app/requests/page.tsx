@@ -67,10 +67,10 @@ export default function RequestsPage() {
 
   async function loadAll(eid: string) {
     try {
+      // Load ALL POs created by this user across all entities
       const { data: ordersData } = await supabase
         .from('purchase_orders')
         .select('*, supplier:suppliers(id, name)')
-        .eq('company_id', eid)
         .order('created_at', { ascending: false })
       setOrders(ordersData || [])
 
@@ -193,7 +193,6 @@ export default function RequestsPage() {
         const approvalRows = approvers.map((approverId: string) => ({
           document_id: po.id,
           document_type: 'purchase_order',
-          entity_id: submitEntityId,
           submitted_by: approverId,
           status: 'submitted',
           level: firstLevel,
@@ -264,7 +263,7 @@ export default function RequestsPage() {
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'14px' }}>
             <thead style={{ background:'#f9fafb' }}>
               <tr>
-                {['PO Number','Title','Department','Supplier','Amount','Status','Date'].map(h => (
+                {['PO Number','Title','Entity','Department','Supplier','Amount','Status','Date'].map(h => (
                   <th key={h} style={{ padding:'12px 16px', textAlign:'left', fontSize:'12px', fontWeight:'600', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.4px', borderBottom:'1px solid #e5e7eb' }}>{h}</th>
                 ))}
               </tr>
@@ -280,6 +279,7 @@ export default function RequestsPage() {
                     onMouseLeave={e => (e.currentTarget.style.background='')}>
                     <td style={{ padding:'12px 16px', fontFamily:'monospace', fontSize:'12px', color:'#6b7280' }}>{o.po_number}</td>
                     <td style={{ padding:'12px 16px', fontWeight:'500' }}>{o.title}</td>
+                    <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{COMPANIES[o.company_id]?.code || '—'}</td>
                     <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{o.department || '—'}</td>
                     <td style={{ padding:'12px 16px', color:'#6b7280', fontSize:'13px' }}>{o.supplier?.name || '—'}</td>
                     <td style={{ padding:'12px 16px', fontWeight:'600', color:'#111827' }}>{fmtAmt(o.amount, o.currency || 'INR')}</td>
