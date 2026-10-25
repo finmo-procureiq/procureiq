@@ -164,16 +164,38 @@ export default function UsersPage() {
         FINANCE: '0fafb943-5a6e-468f-a6da-0fded964c173',
         ADMIN: 'd4ca2a99-039e-4976-b7d1-a42ef2894477',
       }
-      await supabase.from('company_members').update({
+      // Update all company_members rows for this user
+      const updatePayload = {
         roles: editForm.roles,
         role_id: primaryRoleId[editForm.roles[0]],
         department: editForm.department || null,
         manages_department: editForm.manages_department,
-      }).eq('user_id', editUser.user_id).eq('is_active', true)
+      }
+      console.log('Updating user_id:', editUser.user_id, 'payload:', updatePayload)
+
+      const { data: updatedRows, error: updateError } = await supabase
+        .from('company_members')
+        .update(updatePayload)
+        .eq('user_id', editUser.user_id)
+        .eq('is_active', true)
+        .select()
+
+      console.log('Update result - rows:', updatedRows, 'error:', updateError)
+
+      if (updateError) throw updateError
+      if (!updatedRows || updatedRows.length === 0) {
+        alert('Warning: no rows were updated. The user may not have active company_members records.')
+      }
 
       if (editForm.department) {
         await supabase.from('user_profiles').update({ department: editForm.department }).eq('id', editUser.user_id)
       }
+
+      // Update local state immediately so UI reflects change before reload
+      setUsers(prev => prev.map(u => u.user_id === editUser.user_id
+        ? { ...u, roles: editForm.roles, department: editForm.department, manages_department: editForm.manages_department }
+        : u
+      ))
       setShowEdit(false); setEditUser(null)
       await load()
     } catch (e: any) { alert('Error: ' + e.message) }
