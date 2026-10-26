@@ -95,7 +95,6 @@ export default function RequestsPage() {
       const { data: suppData } = await supabase
         .from('suppliers')
         .select('id, name')
-        .eq('company_id', eid)
         .eq('status', 'approved')
         .order('name')
       setSuppliers(suppData || [])
@@ -108,7 +107,6 @@ export default function RequestsPage() {
     const { data } = await supabase
       .from('suppliers')
       .select('id, name')
-      .eq('company_id', eid)
       .eq('status', 'approved')
       .order('name')
     setFormSuppliers(data || [])
@@ -117,6 +115,7 @@ export default function RequestsPage() {
   async function createSupplierInline() {
     if (!supplierForm.name || !formEntityId) return
     setSavingSupplier(true)
+    const { data: { user: currentUser } } = await supabase.auth.getUser()
     const { data, error } = await supabase.from('suppliers').insert({
       company_id: formEntityId,
       name: supplierForm.name,
@@ -124,6 +123,7 @@ export default function RequestsPage() {
       category: supplierForm.category || null,
       status: supplierForm.status,
       payment_terms: 30,
+      created_by: currentUser?.id || null,
     }).select('id, name').single()
     if (error) { alert('Error: ' + error.message); setSavingSupplier(false); return }
     await loadFormSuppliers(formEntityId)

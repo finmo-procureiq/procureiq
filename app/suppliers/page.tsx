@@ -53,6 +53,7 @@ export default function SuppliersPage() {
     if (!form.name || !formEntityId) return
     setSaving(true)
     try {
+      const { data: { user } } = await supabase.auth.getUser()
       const { error } = await supabase.from('suppliers').insert({
         company_id: formEntityId,
         name: form.name,
@@ -66,6 +67,7 @@ export default function SuppliersPage() {
         payment_terms: parseInt(form.payment_terms) || 30,
         category: form.category || null,
         status: form.status,
+        created_by: user?.id || null,
       })
       if (error) { alert('Error saving supplier: ' + error.message); setSaving(false); return }
       setShowForm(false)
