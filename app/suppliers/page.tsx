@@ -28,10 +28,12 @@ export default function SuppliersPage() {
         .from('company_members')
         .select('company_id, companies:company_id(id, name, code, currency, country, is_active)')
         .eq('is_active', true)
+      // Deduplicate by company id
+      const seen = new Set<string>()
       const userCompanies = (memberRows || [])
         .map((r: any) => r.companies)
         .filter(Boolean)
-        .filter((c: any) => c.is_active)
+        .filter((c: any) => c.is_active && !seen.has(c.id) && seen.add(c.id))
       if (userCompanies.length > 0) {
         setCompanies(userCompanies)
         setFormEntityId(userCompanies[0].id)

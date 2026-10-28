@@ -53,10 +53,12 @@ export default function RequestsPage() {
         .from('company_members')
         .select('company_id, companies:company_id(id, name, code, currency, country, is_active)')
         .eq('is_active', true)
+      // Deduplicate by company id
+      const seen = new Set<string>()
       const cosData = (memberRows || [])
         .map((r: any) => r.companies)
         .filter(Boolean)
-        .filter((c: any) => c.is_active)
+        .filter((c: any) => c.is_active && !seen.has(c.id) && seen.add(c.id))
       const cosMap: Record<string, { code: string; currency: string; name: string }> = {}
       if (cosData.length > 0) {
         setCompanies(cosData)
