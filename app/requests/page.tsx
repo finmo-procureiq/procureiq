@@ -44,19 +44,25 @@ export default function RequestsPage() {
 
   async function init() {
     try {
-      // Load companies from API (bypasses RLS)
-      const cosRes = await fetch('/api/companies')
-      const cosData = await cosRes.json()
+      const { data: { user: u } } = await supabase.auth.getUser()
+      if (!u) return
+      setUser(u)
+
+      // Load only companies the current user belongs to (RLS-scoped)
+      const { data: memberRows } = await supabase
+        .from('company_members')
+        .select('company_id, companies:company_id(id, name, code, currency, country, is_active)')
+        .eq('is_active', true)
+      const cosData = (memberRows || [])
+        .map((r: any) => r.companies)
+        .filter(Boolean)
+        .filter((c: any) => c.is_active)
       const cosMap: Record<string, { code: string; currency: string; name: string }> = {}
-      if (Array.isArray(cosData)) {
+      if (cosData.length > 0) {
         setCompanies(cosData)
         cosData.forEach((c: any) => { cosMap[c.id] = { code: c.code, currency: c.currency, name: c.name } })
         setCompaniesMap(cosMap)
       }
-
-      const { data: { user: u } } = await supabase.auth.getUser()
-      if (!u) return
-      setUser(u)
 
       const { data: member } = await supabase
         .from('company_members')

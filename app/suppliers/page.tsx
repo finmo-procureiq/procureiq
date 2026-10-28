@@ -23,11 +23,18 @@ export default function SuppliersPage() {
 
   async function init() {
     try {
-      const cosRes = await fetch('/api/companies')
-      const cosData = await cosRes.json()
-      if (Array.isArray(cosData) && cosData.length > 0) {
-        setCompanies(cosData)
-        setFormEntityId(cosData[0].id)
+      // Load only companies the current user belongs to (via RLS-scoped query)
+      const { data: memberRows } = await supabase
+        .from('company_members')
+        .select('company_id, companies:company_id(id, name, code, currency, country, is_active)')
+        .eq('is_active', true)
+      const userCompanies = (memberRows || [])
+        .map((r: any) => r.companies)
+        .filter(Boolean)
+        .filter((c: any) => c.is_active)
+      if (userCompanies.length > 0) {
+        setCompanies(userCompanies)
+        setFormEntityId(userCompanies[0].id)
       }
       await loadSuppliers()
     } catch (e) {
