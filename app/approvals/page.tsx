@@ -296,9 +296,13 @@ export default function ApprovalsPage() {
           .single()
 
         if (makerProfile?.email) {
+          const requiredLevels: string[] = po.required_levels || []
+          const currentIdx = requiredLevels.indexOf(approvalRequest.level)
           const isFinalApproval = action === 'approve' &&
-            (approvalRequest.level === 'FINANCE' ||
-              (po.required_levels || []).indexOf(approvalRequest.level) >= (po.required_levels || []).length - 1)
+            (approvalRequest.level === 'FINANCE' || currentIdx >= requiredLevels.length - 1)
+          const nextLevel = (!isFinalApproval && action === 'approve' && currentIdx >= 0)
+            ? requiredLevels[currentIdx + 1]
+            : null
 
           fetch('/api/email', {
             method: 'POST',
@@ -316,6 +320,7 @@ export default function ApprovalsPage() {
                 approverName: approverProfile?.full_name || user.email,
                 makerEmail: makerProfile.email,
                 isFinal: isFinalApproval,
+                nextLevel,
                 reason: notes || '—',
               }
             })
